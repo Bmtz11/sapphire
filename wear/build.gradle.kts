@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.bachir.khutwa.wear"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         // Must match the phone app id so the Data Layer connects them.

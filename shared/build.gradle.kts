@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.bachir.khutwa.shared"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig { minSdk = 28 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
