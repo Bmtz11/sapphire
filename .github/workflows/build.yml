@@ -24,7 +24,11 @@ jobs:
       - name: Build phone + watch
         run: |
           chmod +x gradlew
-          ./gradlew :mobile:assembleRelease :wear:assembleRelease --stacktrace
+          set -o pipefail
+          ./gradlew :mobile:assembleRelease :wear:assembleRelease --continue 2>&1 | tee build.log || {
+            grep -E "^e: |What went wrong|^> " build.log | head -60 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }
 
       - name: Rename APKs
         run: |
