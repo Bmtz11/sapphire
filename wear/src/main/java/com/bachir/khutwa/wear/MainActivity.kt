@@ -59,6 +59,7 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
+import com.bachir.khutwa.shared.CoachConfig
 import com.bachir.khutwa.shared.Fmt
 import com.bachir.khutwa.shared.LiveSession
 import com.bachir.khutwa.shared.LiveStats
@@ -85,10 +86,10 @@ val Readex = FontFamily(
     Font(R.font.readex_semibold, FontWeight.SemiBold),
     Font(R.font.readex_bold, FontWeight.Bold),
 )
-val Doto = FontFamily(Font(R.font.doto_black, FontWeight.Black))
+val Saira = FontFamily(Font(R.font.saira_bold, FontWeight.Bold), Font(R.font.saira_extrabold, FontWeight.ExtraBold))
 fun txt(size: Int, color: Color = Color.White, weight: FontWeight = FontWeight.Normal) =
     TextStyle(fontFamily = Readex, fontSize = size.sp, color = color, fontWeight = weight)
-fun doto(size: TextUnit) = TextStyle(fontFamily = Doto, fontWeight = FontWeight.Black, fontSize = size, color = Color.White, textDirection = TextDirection.Ltr)
+fun doto(size: TextUnit) = TextStyle(fontFamily = Saira, fontWeight = FontWeight.ExtraBold, fontSize = size, color = Color.White, textDirection = TextDirection.Ltr)
 
 val Bg = Color(0xFF070708)
 val Muted = Color(0xFFA3A6AD)
@@ -123,11 +124,12 @@ fun ToneBox(tone: Tone, modifier: Modifier, radius: Dp, pad: Dp, content: @Compo
 
 object WatchToday {
     val today = MutableStateFlow<TodaySummary?>(null)
+    val coach = MutableStateFlow(CoachConfig())
     fun read(item: com.google.android.gms.wearable.DataItem) {
         if (item.uri.path != "/khutwa/today") return
-        DataMapItem.fromDataItem(item).dataMap.getString("json")?.let {
-            runCatching { today.value = TodaySummary.decode(it) }
-        }
+        val map = DataMapItem.fromDataItem(item).dataMap
+        map.getString("json")?.let { runCatching { today.value = TodaySummary.decode(it) } }
+        map.getString("coach")?.let { runCatching { coach.value = CoachConfig.decode(it) } }
     }
 }
 
@@ -282,12 +284,13 @@ private fun HeartCard(t: TodaySummary?) {
 
 @Composable
 private fun LiveScreen(s: LiveStats, onTapPace: () -> Unit, onEnd: () -> Unit) {
+    val ctx = LocalContext.current
     var confirm by remember { mutableStateOf(false) }
     LaunchedEffect(confirm) { if (confirm) { delay(3000); confirm = false } }
     val football = s.type == WorkoutType.FOOTBALL
-    val color = when { football -> Color(0xFF3DD68C); s.mode == Mode.RUN -> RunOrange; else -> WalkBlue }
+    val color = when { s.paused -> Color(0xFF6B6F76); football -> Color(0xFF3DD68C); s.mode == Mode.RUN -> RunOrange; else -> WalkBlue }
     val glow = when { football -> Color(0xFF2E7A50); s.mode == Mode.RUN -> RunOrange; else -> Color(0xFF2A6FD6) }
-    val label = if (football) "كرة قدم" else if (s.mode == Mode.RUN) "جري" else "مشي"
+    val label = if (s.paused) "متوقف" else if (football) "كرة قدم" else if (s.mode == Mode.RUN) "جري" else "مشي"
     // progress ring: fraction of the current kilometer
     val kmFrac = ((s.distanceM % 1000) / 1000).toFloat()
 
@@ -323,10 +326,17 @@ private fun LiveScreen(s: LiveStats, onTapPace: () -> Unit, onEnd: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(5.dp))
-            Box(
-                Modifier.clip(RoundedCornerShape(12.dp)).background(if (confirm) Color(0xFFE53935) else Color(0xFF1C1D21))
-                    .clickable { if (confirm) onEnd() else confirm = true }.padding(horizontal = 14.dp, vertical = 4.dp)
-            ) { Text(if (confirm) "تأكيد" else "إنهاء", style = txt(10)) }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(30.dp).clip(CircleShape).background(Color.White)
+                        .clickable { if (s.paused) ExerciseService.resume(ctx) else ExerciseService.pause(ctx) },
+                    contentAlignment = Alignment.Center,
+                ) { Text(if (s.paused) "▶" else "II", style = txt(11, Color(0xFF0B0B0C), FontWeight.Bold)) }
+                Box(
+                    Modifier.clip(RoundedCornerShape(12.dp)).background(if (confirm) Color(0xFFE53935) else Color(0xFF1C1D21))
+                        .clickable { if (confirm) onEnd() else confirm = true }.padding(horizontal = 14.dp, vertical = 6.dp)
+                ) { Text(if (confirm) "تأكيد" else "إنهاء", style = txt(10)) }
+            }
         }
     }
 }

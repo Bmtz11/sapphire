@@ -1,23 +1,44 @@
 package com.bachir.khutwa.mobile
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -27,6 +48,10 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 val Readex = FontFamily(
     Font(R.font.readex_regular, FontWeight.Normal),
@@ -34,17 +59,24 @@ val Readex = FontFamily(
     Font(R.font.readex_semibold, FontWeight.SemiBold),
     Font(R.font.readex_bold, FontWeight.Bold),
 )
-val Doto = FontFamily(Font(R.font.doto_black, FontWeight.Black))
-
-fun dotoStyle(size: TextUnit, color: Color) = TextStyle(
-    fontFamily = Doto, fontWeight = FontWeight.Black, fontSize = size, color = color,
-    textDirection = TextDirection.Ltr,
+/** Sporty semi-condensed numerals — readable at a glance while moving. */
+val Saira = FontFamily(
+    Font(R.font.saira_semibold, FontWeight.SemiBold),
+    Font(R.font.saira_bold, FontWeight.Bold),
+    Font(R.font.saira_extrabold, FontWeight.ExtraBold),
 )
 
-// Mode colors — same as the design
+fun numStyle(size: TextUnit, color: Color, weight: FontWeight = FontWeight.ExtraBold) = TextStyle(
+    fontFamily = Saira, fontWeight = weight, fontSize = size, color = color,
+    textDirection = TextDirection.Ltr, lineHeight = size * 1.0f,
+)
+
+// Mode colors
 val WalkBlue = Color(0xFF4FA3F7)
 val RunOrange = Color(0xFFFF7A1A)
+val FootballGreen = Color(0xFF3DD68C)
 val HeartRed = Color(0xFFFF5A4E)
+val ZoneColors = listOf(Color(0xFF8B9099), Color(0xFF4FA3F7), Color(0xFF3DD68C), Color(0xFFF5D24A), Color(0xFFFF7A1A), Color(0xFFFF453A))
 
 data class Palette(
     val dark: Boolean,
@@ -53,7 +85,7 @@ data class Palette(
     val text: Color,
     val muted: Color,
     val line: Color,
-    val invBg: Color,   // the black/white CTA
+    val invBg: Color,
     val invText: Color,
 )
 
@@ -62,7 +94,6 @@ val DarkPalette = Palette(true, Color(0xFF070708), Color(0xFF141518), Color.Whit
 
 val LocalPalette = staticCompositionLocalOf { DarkPalette }
 
-/** A soft radial blob drawn behind content (fractions of the box size). */
 data class Blob(val color: Color, val cx: Float, val cy: Float, val r: Float)
 
 fun Modifier.blobs(vararg list: Blob) = drawBehind {
@@ -73,9 +104,49 @@ fun Modifier.blobs(vararg list: Blob) = drawBehind {
     }
 }
 
-/** Gradient card styles from the design, keyed by meaning. */
+/** Blobs that drift slowly in circles — keeps the cards alive. */
+fun Modifier.liveBlobs(list: List<Blob>, drift: Float = 0.07f, periodMs: Int = 9000) = composed {
+    val t by rememberInfiniteTransition(label = "blobs").animateFloat(
+        0f, (2 * PI).toFloat(),
+        infiniteRepeatable(tween(periodMs, easing = LinearEasing)), label = "t",
+    )
+    drawBehind {
+        list.forEachIndexed { i, b ->
+            val ph = t + i * 2.1f
+            val c = Offset(size.width * (b.cx + drift * cos(ph)), size.height * (b.cy + drift * sin(ph * 0.8f)))
+            val rad = size.minDimension * b.r * (1f + 0.06f * sin(ph * 1.3f))
+            drawCircle(Brush.radialGradient(listOf(b.color, b.color.copy(alpha = 0f)), c, rad), rad, c)
+        }
+    }
+}
+
+/** Press-and-spring scale for anything tappable. */
+fun Modifier.bounceClick(enabled: Boolean = true, onClick: () -> Unit) = composed {
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.95f else 1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium), label = "press")
+    graphicsLayer { scaleX = scale; scaleY = scale }
+        .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick)
+}
+
+/** Fade + rise in, staggered by index. */
+fun Modifier.enter(index: Int) = composed {
+    val a = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { delay(index * 55L); a.animateTo(1f, tween(480, easing = FastOutSlowInEasing)) }
+    graphicsLayer { alpha = a.value; translationY = (1f - a.value) * 36.dp.toPx() }
+}
+
+/** Number that counts up/down to its value. */
+@Composable
+fun CountText(value: Long, style: TextStyle, format: (Long) -> String = { it.grouped() }, modifier: Modifier = Modifier) {
+    val anim = remember { Animatable(0f) }
+    LaunchedEffect(value) { anim.animateTo(value.toFloat(), tween(900, easing = FastOutSlowInEasing)) }
+    Text(format(anim.value.toLong()), style = style, modifier = modifier)
+}
+
+/** Gradient card styles, keyed by meaning. */
 enum class CardTone(val base: Color, val blobs: List<Blob>, val linear: Brush? = null) {
-    STEPS(Color(0xFF7B4F66), listOf(Blob(Color(0xCC1E0A28), 0.15f, 0.1f, 0.9f)),
+    STEPS(Color(0xFF7B4F66), listOf(Blob(Color(0xCC1E0A28), 0.15f, 0.1f, 0.9f), Blob(Color(0x66F5E15A), 0.9f, 1.0f, 0.5f)),
         Brush.linearGradient(listOf(Color(0xFF4A3E5E), Color(0xFF7B4F66), Color(0xFFC77370)))),
     HEART(Color(0xFF2A2F2E), listOf(Blob(Color(0x8C96B4A0), 0.9f, 0.0f, 1.1f), Blob(Color(0xFF050505), 0.1f, 1.0f, 0.7f))),
     SLEEP(Color(0xFF1C2C8A), listOf(Blob(Color(0x995A78FF), 0.9f, 0.0f, 1.0f), Blob(Color(0xFF04061A), 0.25f, 0.45f, 0.6f))),
@@ -83,6 +154,7 @@ enum class CardTone(val base: Color, val blobs: List<Blob>, val linear: Brush? =
     MINUTES_LIGHT(Color(0xFF6B5A4A), listOf(Blob(Color(0xB35FA0DC), 0.1f, 0.05f, 0.75f)),
         Brush.linearGradient(listOf(Color(0xFF3A3F4A), Color(0xFF6B5A4A), Color(0xFFC9803E)))),
     WORKOUTS(Color(0xFFC4532E), listOf(Blob(Color(0xE63C50F0), 0.2f, 0.45f, 0.5f))),
+    GOAL(Color(0xFF1E2A26), listOf(Blob(Color(0xAA3DD68C), 0.85f, 0.2f, 0.9f), Blob(Color(0xFF050807), 0.15f, 0.9f, 0.6f))),
     WALK(Color(0xFF2A6FD6), listOf(Blob(Color(0xFF071433), 0.25f, 0.3f, 0.75f), Blob(Color(0xCC8CBEFF), 1.0f, 1.1f, 0.7f))),
     RUN(Color(0xFFC4532E), listOf(Blob(Color(0xE63C50F0), 0.25f, 0.35f, 0.55f))),
     FOOTBALL(Color(0xFF2E4A3A), listOf(Blob(Color(0x8CA0D278), 0.9f, 0.0f, 1.1f), Blob(Color(0xFF050805), 0.1f, 1.0f, 0.7f))),
@@ -90,12 +162,11 @@ enum class CardTone(val base: Color, val blobs: List<Blob>, val linear: Brush? =
 
 @Composable
 fun ToneCard(tone: CardTone, modifier: Modifier = Modifier, radius: Dp = 34.dp, pad: Dp = 16.dp, content: @Composable BoxScope.() -> Unit) {
-    val shape = RoundedCornerShape(radius)
     Box(
         modifier
-            .clip(shape)
+            .clip(RoundedCornerShape(radius))
             .then(if (tone.linear != null) Modifier.background(tone.linear) else Modifier.background(tone.base))
-            .blobs(*tone.blobs.toTypedArray())
+            .liveBlobs(tone.blobs)
             .padding(pad),
         content = content,
     )
@@ -114,7 +185,6 @@ fun PlainCard(modifier: Modifier = Modifier, radius: Dp = 30.dp, pad: Dp = 16.dp
     )
 }
 
-/** Outlined circle icon, top corner of the cards. */
 @Composable
 fun CircleIcon(icon: ImageVector, tint: Color, ring: Color, size: Dp = 38.dp, filled: Color? = null) {
     Box(
@@ -122,4 +192,17 @@ fun CircleIcon(icon: ImageVector, tint: Color, ring: Color, size: Dp = 38.dp, fi
             .then(if (filled != null) Modifier.background(filled) else Modifier.border(1.dp, ring, CircleShape)),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.48f)) }
+}
+
+/** Heart that beats at the given bpm. */
+@Composable
+fun BeatingHeart(bpm: Int?, tint: Color, size: Dp = 16.dp) {
+    val period = ((60_000 / (bpm ?: 70).coerceIn(40, 200))).coerceAtLeast(300)
+    val s by rememberInfiniteTransition(label = "beat").animateFloat(
+        1f, 1.25f, infiniteRepeatable(tween(period / 2, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "s",
+    )
+    Icon(
+        androidx.compose.material.icons.Icons.Filled.Favorite, null, tint = tint,
+        modifier = Modifier.size(size).graphicsLayer { scaleX = s; scaleY = s },
+    )
 }

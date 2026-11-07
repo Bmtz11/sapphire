@@ -7,7 +7,13 @@ import kotlin.math.sqrt
 
 sealed interface CoachEvent {
     data class ModeChanged(val mode: Mode, val lastSegment: Segment) : CoachEvent
-    data class KmSplit(val km: Int, val splitSec: Int, val currentPaceSec: Int?) : CoachEvent
+    /** Fired every `announceEveryM` (500 m or 1 km). */
+    data class Distance(val meters: Int, val lastSplitSec: Int, val currentPaceSec: Int?) : CoachEvent
+    data class GoalHalf(val goalM: Int) : CoachEvent
+    data class GoalReached(val goalM: Int, val elapsedMs: Long) : CoachEvent
+    data class ZoneHigh(val zone: Int, val hr: Int) : CoachEvent
+    data object AutoPaused : CoachEvent
+    data object AutoResumed : CoachEvent
 }
 
 /** Platform-free recorder used by both the watch and the phone. */
@@ -16,14 +22,14 @@ class WorkoutRecorder(
     private val startMs: Long,
     private val source: String,
     val type: WorkoutType = WorkoutType.WALK,
-    private val classifier: GaitClassifier = GaitClassifier(),
+    private val config: CoachConfig = CoachConfig(),
 ) {
-    /** Football: no walk/run announcements, but sprints + top speed. */
-    private val speaks = type != WorkoutType.FOOTBALL
-    private var sprints = 0
-    private var sprintSince: Long? = null
-    private var sprintCounted = false
-    private var maxSpeed = 0.0
+    private val classifier = GaitClassifier(
+        runSpeed = config.runSpeedKmh / 3.6,
+        walkSpeed = (config.runSpeedKmh - 0.9) / 3.6,
+    )
+    private val football = type == WorkoutType.FOOTBALL
+
     private val points = ArrayList<TrackPoint>()
     private val cumDist = ArrayList<Double>()
     private val segments = ArrayList<Segment>()
@@ -35,6 +41,10 @@ class WorkoutRecorder(
     private var segStartMs = startMs
     private var segStartDist = 0.0
     private var kmStartMs = startMs
+    private var nextAnnounce = config.announceEveryM.toDouble()
+    private var announceStartMs = startMs
+    private var goalHalfSaid = false
+    private var goalSaid = false
 
     private var smoothSpeed = 0.0
     private var hasSpeed = false
@@ -45,12 +55,41 @@ class WorkoutRecorder(
     private var hrSum = 0L
     private var hrCount = 0
     private var maxHr = 0
+    private var lastZoneAlert = 0L
     private var lastFixT = 0L
 
-    fun onHeartRate(bpm: Int) {
-        if (bpm !in 30..230) return
-        hr = bpm; hrSum += bpm; hrCount++
+    private var sprints = 0
+    private var sprintSince: Long? = null
+    private var sprintCounted = false
+    private var maxSpeed = 0.0
+
+    // pause
+    var paused = false; private set
+    private var autoPaused = false
+    private var pausedAt = 0L
+    private var pausedTotal = 0L
+    private var breakTrack = false
+    private var slowSince: Long? = null
+
+    fun pause(now: Long) { if (!paused) { paused = true; pausedAt = now } }
+    fun resume(now: Long) {
+        if (paused) { pausedTotal += now - pausedAt; paused = false; autoPaused = false; breakTrack = true }
+    }
+
+    private fun elapsed(now: Long) = (if (paused) pausedAt else now) - startMs - pausedTotal
+
+    fun onHeartRate(t: Long, bpm: Int): List<CoachEvent> {
+        if (bpm !in 30..230) return emptyList()
+        hr = bpm
+        if (paused) return emptyList()
+        hrSum += bpm; hrCount++
         if (bpm > maxHr) maxHr = bpm
+        val z = hrZone(bpm, config.maxHr)
+        if (config.hrAlertZone in 1..4 && z > config.hrAlertZone && t - lastZoneAlert > 90_000) {
+            lastZoneAlert = t
+            return listOf(CoachEvent.ZoneHigh(z, bpm))
+        }
+        return emptyList()
     }
 
     fun onCadence(t: Long, spm: Double) { cadence = spm; cadenceT = t }
@@ -60,11 +99,10 @@ class WorkoutRecorder(
 
     private fun feedSpeed(t: Long, mps: Double) {
         if (mps.isNaN() || mps < 0 || mps > 12) return
-        if (mps > maxSpeed) maxSpeed = mps
-        // sprint = ≥ 18 km/h held for 1.5 s
+        if (!paused && mps > maxSpeed) maxSpeed = mps
         if (mps >= 5.0) {
             val since = sprintSince ?: t.also { sprintSince = it }
-            if (!sprintCounted && t - since >= 1_500) { sprints++; sprintCounted = true }
+            if (!sprintCounted && t - since >= 1_500 && !paused) { sprints++; sprintCounted = true }
         } else if (mps < 4.0) {
             sprintSince = null; sprintCounted = false
         }
@@ -76,17 +114,30 @@ class WorkoutRecorder(
         val events = mutableListOf<CoachEvent>()
         if ((p.acc ?: 0f) > 30f) return events
         lastFixT = p.t
+        gpsSpeed?.let { onSpeed(p.t, it) }
+
+        // auto pause: stopped for 10 s; resume when moving again
+        if (config.autoPause && !football) {
+            if (smoothSpeed < 0.5) {
+                val s = slowSince ?: p.t.also { slowSince = it }
+                if (!paused && p.t - s > 10_000) { pause(p.t); autoPaused = true; events += CoachEvent.AutoPaused }
+            } else {
+                slowSince = null
+                if (paused && autoPaused) { resume(p.t); events += CoachEvent.AutoResumed }
+            }
+        }
+        if (paused) return filter(events)
 
         val prev = points.lastOrNull()
-        if (prev != null) {
+        if (prev != null && !breakTrack) {
             val dt = (p.t - prev.t) / 1000.0
-            if (dt <= 0) return events
+            if (dt <= 0) return filter(events)
             val d = haversine(prev, p)
-            if (d / dt > 12.0) return events           // GPS jump
+            if (d / dt > 12.0) return filter(events)            // GPS jump
             distance += d
             if (gpsSpeed == null && p.t - externalSpeedT > 5_000) feedSpeed(p.t, d / dt)
         }
-        gpsSpeed?.let { onSpeed(p.t, it) }
+        breakTrack = false
         points += p
         cumDist += distance
 
@@ -99,32 +150,42 @@ class WorkoutRecorder(
             if (seg.endMs > seg.startMs) segments += seg
             segStartMs = at
             segStartDist = distAt
-            events += CoachEvent.ModeChanged(classifier.mode, seg)
+            if (!football) events += CoachEvent.ModeChanged(classifier.mode, seg)
         }
 
         while (distance >= (splits.size + 1) * 1000.0) {
             val km = splits.size + 1
-            val sec = ((p.t - kmStartMs) / 1000).toInt()
-            splits += Split(km, sec)
+            splits += Split(km, ((p.t - kmStartMs - 0) / 1000).toInt())
             kmStartMs = p.t
-            events += CoachEvent.KmSplit(km, sec, currentPaceSec())
         }
-        return if (speaks) events else emptyList()
+        if (distance >= nextAnnounce) {
+            val sec = ((p.t - announceStartMs) / 1000).toInt()
+            announceStartMs = p.t
+            if (!football) events += CoachEvent.Distance(nextAnnounce.toInt(), sec, currentPaceSec())
+            nextAnnounce += config.announceEveryM
+        }
+        if (config.goalM > 0) {
+            if (!goalHalfSaid && distance >= config.goalM / 2.0) { goalHalfSaid = true; events += CoachEvent.GoalHalf(config.goalM) }
+            if (!goalSaid && distance >= config.goalM) { goalSaid = true; events += CoachEvent.GoalReached(config.goalM, elapsed(p.t)) }
+        }
+        return filter(events)
     }
 
-    fun currentPaceSec(): Int? = if (!hasSpeed || smoothSpeed < 0.5) null else (1000 / smoothSpeed).toInt()
+    private fun filter(e: List<CoachEvent>) = if (config.coachOn) e else emptyList()
+
+    fun currentPaceSec(): Int? = if (!hasSpeed || smoothSpeed < 0.5 || paused) null else (1000 / smoothSpeed).toInt()
 
     fun stats(now: Long): LiveStats {
-        val elapsed = now - startMs
         val curSeg = distance - segStartDist
         val runDone = segments.filter { it.mode == Mode.RUN }.sumOf { it.distanceM }
         val walkDone = segments.filter { it.mode == Mode.WALK }.sumOf { it.distanceM }
+        val el = elapsed(now)
         return LiveStats(
             mode = mode,
-            elapsedMs = elapsed,
+            elapsedMs = el,
             distanceM = distance,
             paceSec = currentPaceSec(),
-            avgPaceSec = if (distance > 50) ((elapsed / 1000.0) / (distance / 1000.0)).toInt() else null,
+            avgPaceSec = if (distance > 50) ((el / 1000.0) / (distance / 1000.0)).toInt() else null,
             hr = hr,
             runM = runDone + if (mode == Mode.RUN) curSeg else 0.0,
             walkM = walkDone + if (mode == Mode.WALK) curSeg else 0.0,
@@ -133,10 +194,14 @@ class WorkoutRecorder(
             sprints = sprints,
             segments = segments.toList() +
                 (if (now > segStartMs) listOf(Segment(mode, segStartMs, now, curSeg)) else emptyList()),
+            paused = paused,
+            zone = hrZone(hr, config.maxHr),
+            goalM = config.goalM,
         )
     }
 
     fun finish(endMs: Long): Workout {
+        if (paused) resume(endMs)
         val segs = segments.toMutableList()
         if (endMs > segStartMs) segs += Segment(mode, segStartMs, endMs, distance - segStartDist)
         return Workout(
@@ -144,7 +209,7 @@ class WorkoutRecorder(
             points = points.toList(), segments = segs, splits = splits.toList(),
             avgHr = if (hrCount > 0) (hrSum / hrCount).toInt() else null,
             maxHr = maxHr.takeIf { it > 0 }, source = source,
-            type = type, sprints = sprints, maxSpeedMps = maxSpeed,
+            type = type, sprints = sprints, maxSpeedMps = maxSpeed, pausedMs = pausedTotal,
         )
     }
 

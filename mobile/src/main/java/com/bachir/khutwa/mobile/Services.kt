@@ -46,11 +46,17 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
         private const val ACTION_START = "start"
         private const val ACTION_STOP = "stop"
         private const val ACTION_SPEAK = "speak"
-        fun start(ctx: Context, type: WorkoutType) = ctx.startForegroundService(
-            Intent(ctx, PhoneWorkoutService::class.java).setAction(ACTION_START).putExtra("type", type.name)
+        private const val ACTION_PAUSE = "pause"
+        private const val ACTION_RESUME = "resume"
+        fun start(ctx: Context, type: WorkoutType, goalM: Int) = ctx.startForegroundService(
+            Intent(ctx, PhoneWorkoutService::class.java).setAction(ACTION_START)
+                .putExtra("type", type.name).putExtra("goal", goalM)
         )
-        fun stop(ctx: Context) = ctx.startService(Intent(ctx, PhoneWorkoutService::class.java).setAction(ACTION_STOP))
-        fun speakStatus(ctx: Context) = ctx.startService(Intent(ctx, PhoneWorkoutService::class.java).setAction(ACTION_SPEAK))
+        fun stop(ctx: Context) = send(ctx, ACTION_STOP)
+        fun speakStatus(ctx: Context) = send(ctx, ACTION_SPEAK)
+        fun pause(ctx: Context) = send(ctx, ACTION_PAUSE)
+        fun resume(ctx: Context) = send(ctx, ACTION_RESUME)
+        private fun send(ctx: Context, a: String) = ctx.startService(Intent(ctx, PhoneWorkoutService::class.java).setAction(a))
     }
 
     private lateinit var speaker: TtsSpeaker
@@ -59,26 +65,33 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
     private var recorder: WorkoutRecorder? = null
     private var ticker: Job? = null
     private val steps = ArrayDeque<Long>()
+    private val coachOn get() = Settings.current.coachOn
 
     override fun onCreate() {
         super.onCreate()
-        speaker = TtsSpeaker(this)
+        speaker = TtsSpeaker(this).apply { rate = Settings.current.voiceRate }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        val now = System.currentTimeMillis()
         when (intent?.action) {
             ACTION_START -> startWorkout(
-                runCatching { WorkoutType.valueOf(intent.getStringExtra("type") ?: "") }.getOrDefault(WorkoutType.WALK)
+                runCatching { WorkoutType.valueOf(intent.getStringExtra("type") ?: "") }.getOrDefault(WorkoutType.WALK),
+                intent.getIntExtra("goal", 0),
             )
             ACTION_STOP -> stopWorkout()
             ACTION_SPEAK -> speaker.speak(ArabicCoach.status(LiveSession.stats.value))
+            ACTION_PAUSE -> recorder?.let { it.pause(now); publish(); if (coachOn) speaker.speak(ArabicCoach.paused()) }
+            ACTION_RESUME -> recorder?.let { it.resume(now); publish(); if (coachOn) speaker.speak(ArabicCoach.resumed()) }
         }
         return START_NOT_STICKY
     }
 
+    private fun publish() { recorder?.let { LiveSession.stats.value = it.stats(System.currentTimeMillis()) } }
+
     @SuppressLint("MissingPermission")
-    private fun startWorkout(type: WorkoutType) {
+    private fun startWorkout(type: WorkoutType, goalM: Int) {
         if (recorder != null) return
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         ServiceCompat.startForeground(
@@ -86,9 +99,9 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
         )
         val now = System.currentTimeMillis()
-        recorder = WorkoutRecorder(UUID.randomUUID().toString(), now, "phone", type).also {
-            LiveSession.stats.value = it.stats(now)
-        }
+        recorder = WorkoutRecorder(UUID.randomUUID().toString(), now, "phone", type, Settings.current.coach(goalM))
+        LiveSession.lastWorkout.value = null
+        publish()
 
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
             .setMinUpdateIntervalMillis(1000L).build()
@@ -96,13 +109,10 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
         sensors.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let {
             sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
         }
-        if (Prefs.coach(this)) speaker.speak(ArabicCoach.start(type))
+        if (coachOn) speaker.speak(ArabicCoach.start(type))
 
         ticker = lifecycleScope.launch {
-            while (isActive) {
-                recorder?.let { LiveSession.stats.value = it.stats(System.currentTimeMillis()) }
-                delay(1000)
-            }
+            while (isActive) { publish(); delay(1000) }
         }
     }
 
@@ -115,7 +125,7 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
         val w = r.finish(System.currentTimeMillis())
         LiveSession.stats.value = null
         LiveSession.lastWorkout.value = w
-        if (Prefs.coach(this)) speaker.speak(ArabicCoach.finish(w))
+        if (coachOn) speaker.speak(ArabicCoach.finish(w))
         WorkoutStore.saveAndSync(this, w)
         lifecycleScope.launch {
             delay(8_000)
@@ -133,8 +143,8 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
                     alt = if (l.hasAltitude()) l.altitude else null,
                     acc = if (l.hasAccuracy()) l.accuracy else null,
                 )
-                val events = r.onLocation(p, if (l.hasSpeed()) l.speed.toDouble() else null)
-                if (Prefs.coach(this@PhoneWorkoutService)) events.forEach { speaker.speak(ArabicCoach.phrase(it)) }
+                r.onLocation(p, if (l.hasSpeed()) l.speed.toDouble() else null)
+                    .forEach { speaker.speak(ArabicCoach.phrase(it)) }
             }
         }
     }

@@ -39,10 +39,14 @@ class ExerciseService : LifecycleService() {
         private const val ACTION_START = "start"
         private const val ACTION_STOP = "stop"
         private const val ACTION_SPEAK = "speak"
+        private const val ACTION_PAUSE = "pause"
+        private const val ACTION_RESUME = "resume"
 
         fun start(ctx: Context, type: WorkoutType) = send(ctx, ACTION_START, type)
         fun stop(ctx: Context) = send(ctx, ACTION_STOP)
         fun speakStatus(ctx: Context) = send(ctx, ACTION_SPEAK)
+        fun pause(ctx: Context) = send(ctx, ACTION_PAUSE)
+        fun resume(ctx: Context) = send(ctx, ACTION_RESUME)
 
         private fun send(ctx: Context, action: String, type: WorkoutType? = null) {
             val i = Intent(ctx, ExerciseService::class.java).setAction(action)
@@ -55,6 +59,8 @@ class ExerciseService : LifecycleService() {
     private lateinit var speaker: TtsSpeaker
     private var recorder: WorkoutRecorder? = null
     private var ticker: Job? = null
+    /** Coach settings pushed from the phone (defaults if the phone hasn't sent any yet). */
+    private val coach get() = WatchToday.coach.value
 
     private val bootInstant: Instant
         get() = Instant.ofEpochMilli(System.currentTimeMillis() - SystemClock.elapsedRealtime())
@@ -73,6 +79,18 @@ class ExerciseService : LifecycleService() {
             )
             ACTION_STOP -> stopWorkout()
             ACTION_SPEAK -> speaker.speak(ArabicCoach.status(LiveSession.stats.value))
+            ACTION_PAUSE -> recorder?.let { r ->
+                r.pause(System.currentTimeMillis())
+                lifecycleScope.launch { runCatching { client.pauseExerciseAsync().await() } }
+                LiveSession.stats.value = r.stats(System.currentTimeMillis())
+                if (coach.coachOn) speaker.speak(ArabicCoach.paused())
+            }
+            ACTION_RESUME -> recorder?.let { r ->
+                r.resume(System.currentTimeMillis())
+                lifecycleScope.launch { runCatching { client.resumeExerciseAsync().await() } }
+                LiveSession.stats.value = r.stats(System.currentTimeMillis())
+                if (coach.coachOn) speaker.speak(ArabicCoach.resumed())
+            }
         }
         return START_NOT_STICKY
     }
@@ -81,7 +99,7 @@ class ExerciseService : LifecycleService() {
         if (recorder != null) return
         goForeground()
         val now = System.currentTimeMillis()
-        val r = WorkoutRecorder(UUID.randomUUID().toString(), now, "watch", type)
+        val r = WorkoutRecorder(UUID.randomUUID().toString(), now, "watch", type, coach)
         recorder = r
         LiveSession.lastWorkout.value = null
         LiveSession.stats.value = r.stats(now)
@@ -105,7 +123,7 @@ class ExerciseService : LifecycleService() {
                 .setIsAutoPauseAndResumeEnabled(false)
                 .build()
             client.startExerciseAsync(config).await()
-            speaker.speak(ArabicCoach.start(type))
+            if (coach.coachOn) speaker.speak(ArabicCoach.start(type))
         }
 
         ticker = lifecycleScope.launch {
@@ -126,7 +144,7 @@ class ExerciseService : LifecycleService() {
             val w = r.finish(System.currentTimeMillis())
             LiveSession.stats.value = null
             LiveSession.lastWorkout.value = w
-            speaker.speak(ArabicCoach.finish(w))
+            if (coach.coachOn) speaker.speak(ArabicCoach.finish(w))
             WatchStore.save(this@ExerciseService, w)
             runCatching { PhoneLink.sendWorkout(this@ExerciseService, w) }
             delay(8_000) // let the summary finish speaking
@@ -141,7 +159,9 @@ class ExerciseService : LifecycleService() {
             val boot = bootInstant
             val m = update.latestMetrics
 
-            m.getData(DataType.HEART_RATE_BPM).lastOrNull()?.let { r.onHeartRate(it.value.toInt()) }
+            m.getData(DataType.HEART_RATE_BPM).lastOrNull()?.let { dp ->
+                r.onHeartRate(dp.getTimeInstant(boot).toEpochMilli(), dp.value.toInt()).forEach { speaker.speak(ArabicCoach.phrase(it)) }
+            }
             m.getData(DataType.STEPS_PER_MINUTE).lastOrNull()?.let {
                 r.onCadence(it.getTimeInstant(boot).toEpochMilli(), it.value.toDouble())
             }

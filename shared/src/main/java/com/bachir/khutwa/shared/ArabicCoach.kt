@@ -17,11 +17,21 @@ object ArabicCoach {
             if (e.mode == Mode.RUN) "بديت الجري. خلك على نفس مريح."
             else "رجعت للمشي. جريت ${distance(e.lastSegment.distanceM)} في ${duration(e.lastSegment.endMs - e.lastSegment.startMs)}."
 
-        is CoachEvent.KmSplit -> buildString {
-            append("الكيلو ${e.km}. وقته ${pace(e.splitSec)}.")
+        is CoachEvent.Distance -> buildString {
+            append("${distance(e.meters.toDouble())}. ")
+            if (e.meters % 1000 == 0) append("الكيلو الأخير ${pace(e.lastSplitSec)}.")
+            else append("آخر خمسمية متر ${pace(e.lastSplitSec)}.")
             e.currentPaceSec?.let { append(" وتيرتك الحين ${pace(it)}.") }
         }
+        is CoachEvent.GoalHalf -> "وصلت نص الهدف. باقي ${distance(e.goalM / 2.0)}."
+        is CoachEvent.GoalReached -> "مبروك! حققت هدف ${distance(e.goalM.toDouble())} في ${duration(e.elapsedMs)}."
+        is CoachEvent.ZoneHigh -> "نبضك ${e.hr}، أنت في المنطقة ${e.zone}. خفف شوي."
+        CoachEvent.AutoPaused -> "إيقاف مؤقت."
+        CoachEvent.AutoResumed -> "كملنا."
     }
+
+    fun paused() = "إيقاف مؤقت."
+    fun resumed() = "كملنا. يلا."
 
     fun status(s: LiveStats?): String {
         if (s == null) return "ما فيه تمرين شغال."

@@ -11,6 +11,7 @@ import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.metadata.Device
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.units.Length
+import com.bachir.khutwa.shared.AppSettings
 import com.bachir.khutwa.shared.Mode
 import com.bachir.khutwa.shared.TtsSpeaker
 import com.bachir.khutwa.shared.Workout
@@ -28,6 +29,7 @@ import java.time.ZoneId
 class KhutwaApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        Settings.load(this)
         WorkoutStore.refresh(this)
     }
 }
@@ -85,8 +87,12 @@ object HealthSync {
     suspend fun granted(ctx: Context): Boolean = available(ctx) &&
         HealthConnectClient.getOrCreate(ctx).permissionController.getGrantedPermissions().containsAll(WRITE)
 
+    /** Reads + writes — when false the home screen shows the connect prompt. */
+    suspend fun allGranted(ctx: Context): Boolean = available(ctx) &&
+        HealthConnectClient.getOrCreate(ctx).permissionController.getGrantedPermissions().containsAll(PERMISSIONS)
+
     suspend fun write(ctx: Context, w: Workout): Boolean = runCatching {
-        if (!granted(ctx)) return false
+        if (!Settings.current.syncHealth || !granted(ctx)) return false
         val client = HealthConnectClient.getOrCreate(ctx)
         val rules = ZoneId.systemDefault().rules
         val start = Instant.ofEpochMilli(w.startMs)
@@ -148,10 +154,18 @@ object HealthSync {
     }.getOrDefault(false)
 }
 
-object Prefs {
-    private fun p(ctx: Context) = ctx.getSharedPreferences("khutwa", Context.MODE_PRIVATE)
-    fun coach(ctx: Context) = p(ctx).getBoolean("coach", true)
-    fun setCoach(ctx: Context, on: Boolean) = p(ctx).edit().putBoolean("coach", on).apply()
+/** App settings, persisted as JSON and observable so the UI (theme etc.) updates live. */
+object Settings {
+    val state = MutableStateFlow(AppSettings())
+    private fun p(ctx: Context) = ctx.getSharedPreferences("sapphire", Context.MODE_PRIVATE)
+    fun load(ctx: Context) { state.value = AppSettings.decode(p(ctx).getString("settings", null) ?: "{}") }
+    fun update(ctx: Context, f: (AppSettings) -> AppSettings) {
+        val n = f(state.value)
+        state.value = n
+        p(ctx).edit().putString("settings", AppSettings.encode(n)).apply()
+        AppScope.launch { runCatching { TodayReader.pushSettings(ctx, n) } }
+    }
+    val current get() = state.value
 }
 
 /** Phone voice used when the watch relays coach lines. */

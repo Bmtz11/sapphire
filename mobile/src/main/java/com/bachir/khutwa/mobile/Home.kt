@@ -1,12 +1,15 @@
 package com.bachir.khutwa.mobile
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -17,36 +20,39 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SportsSoccer
+import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,58 +67,67 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-const val USER_NAME = "بشير"
-
 fun String.ar(): String = map { if (it in '0'..'9') '٠' + (it - '0') else it }.joinToString("")
 fun Number.grouped(): String = "%,d".format(Locale.US, this.toLong())
 
 fun txt(size: Int, color: Color, weight: FontWeight = FontWeight.Normal) =
     TextStyle(fontFamily = Readex, fontSize = size.sp, color = color, fontWeight = weight)
 
+fun weekStartMs(): Long = Calendar.getInstance().apply {
+    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    while (get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) add(Calendar.DAY_OF_MONTH, -1)
+}.timeInMillis
+
 @Composable
 fun HomeScreen(
     today: TodaySummary,
     workouts: List<Workout>,
+    streak: Int,
     showConnect: Boolean,
     onConnect: () -> Unit,
     onStart: () -> Unit,
     onOpen: (String) -> Unit,
+    onStats: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     val p = LocalPalette.current
+    val set = Settings.current
     val dayStart = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }.timeInMillis
     val todays = workouts.filter { it.startMs >= dayStart }
+    val weekKm = workouts.filter { it.startMs >= weekStartMs() }.sumOf { it.distanceM } / 1000
 
     Box(
         Modifier.fillMaxSize().background(p.bg).then(
-            if (p.dark) Modifier.blobs(Blob(Color(0x8C783CDC), 0.25f, 0.0f, 0.75f))
-            else Modifier.blobs(Blob(Color(0xD9F4D84A), 0.0f, 0.28f, 0.6f), Blob(Color(0xB3F7E37A), 1.05f, 0.75f, 0.45f))
+            if (p.dark) Modifier.liveBlobs(listOf(Blob(Color(0x8C783CDC), 0.25f, 0.0f, 0.75f)), drift = 0.12f, periodMs = 14000)
+            else Modifier.liveBlobs(listOf(Blob(Color(0xD9F4D84A), 0.0f, 0.28f, 0.6f), Blob(Color(0xB3F7E37A), 1.05f, 0.75f, 0.45f)), drift = 0.1f, periodMs = 14000)
         )
     ) {
         LazyColumn(
             Modifier.fillMaxSize().statusBarsPadding(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 120.dp),
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { Header() }
-            item { StepsHero(today) }
+            item { Header(set.name, streak, Modifier.enter(0)) }
+            item { StepsHero(today, Modifier.enter(1)) }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.enter(2), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     HeartCard(today)
                     SleepCard(today)
                 }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.enter(3), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     MinutesCard(today)
                     WorkoutsCard(today)
                 }
             }
+            item { WeekGoalCard(weekKm, set.weeklyGoalKm, Modifier.enter(4)) }
             if (showConnect) item {
                 Box(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, p.line, RoundedCornerShape(24.dp))
-                        .clickable(onClick = onConnect).padding(16.dp)
+                        .bounceClick(onClick = onConnect).padding(16.dp)
                 ) {
                     Text("اربط مع Samsung Health عشان تظهر الخطوات والنبض والنوم", style = txt(14, p.text, FontWeight.Medium))
                 }
@@ -120,19 +135,17 @@ fun HomeScreen(
             item {
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("تمارين اليوم", style = txt(18, p.text, FontWeight.SemiBold), modifier = Modifier.weight(1f))
-                    Text("${workouts.size} تمرين".ar(), style = txt(13, p.muted))
+                    Text("${todays.size}".ar() + " تمرين", style = txt(13, p.muted))
                 }
             }
             if (todays.isEmpty()) item {
-                PlainCard(Modifier.fillMaxWidth()) {
-                    Text("ما فيه تمارين اليوم للحين.", style = txt(14, p.muted))
-                }
+                PlainCard(Modifier.fillMaxWidth()) { Text("ما فيه تمارين اليوم للحين. يلا!", style = txt(14, p.muted)) }
             }
-            items(todays, key = { it.id }) { w -> WorkoutRow(w) { onOpen(w.id) } }
-            val older = workouts.filter { it.startMs < dayStart }.take(10)
+            itemsIndexed(todays, key = { _, w -> w.id }) { i, w -> WorkoutRow(w, Modifier.enter(5 + i)) { onOpen(w.id) } }
+            val older = workouts.filter { it.startMs < dayStart }.take(15)
             if (older.isNotEmpty()) {
                 item { Text("قبل", style = txt(16, p.text, FontWeight.SemiBold), modifier = Modifier.padding(top = 8.dp)) }
-                items(older, key = { it.id }) { w -> WorkoutRow(w) { onOpen(w.id) } }
+                itemsIndexed(older, key = { _, w -> w.id }) { _, w -> WorkoutRow(w) { onOpen(w.id) } }
             }
         }
 
@@ -142,75 +155,96 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CtaPill("ابدأ تمرين", Modifier.weight(1f), onStart)
+            RoundIcon(Icons.Outlined.BarChart, "الإحصائيات", onStats)
+            RoundIcon(Icons.Outlined.Settings, "الإعدادات", onSettings)
         }
     }
+}
+
+@Composable
+fun RoundIcon(icon: ImageVector, label: String, onClick: () -> Unit, size: Dp = 62.dp) {
+    val p = LocalPalette.current
+    Box(
+        Modifier.size(size).clip(CircleShape)
+            .background(if (p.dark) Color(0xFF141518) else Color.White.copy(alpha = 0.85f))
+            .border(1.dp, p.line, CircleShape)
+            .bounceClick(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, contentDescription = label, tint = p.text, modifier = Modifier.size(22.dp)) }
 }
 
 @Composable
 fun CtaPill(label: String, modifier: Modifier = Modifier, onClick: () -> Unit, play: Boolean = false) {
     val p = LocalPalette.current
     Row(
-        modifier.height(62.dp).clip(RoundedCornerShape(31.dp)).background(p.invBg).clickable(onClick = onClick)
+        modifier.height(62.dp).clip(RoundedCornerShape(31.dp)).background(p.invBg).bounceClick(onClick = onClick)
             .padding(start = 24.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = txt(17, p.invText, FontWeight.SemiBold), modifier = Modifier.weight(1f))
+        Text(label, style = txt(17, p.invText, FontWeight.SemiBold), modifier = Modifier.weight(1f), maxLines = 1)
         Box(Modifier.size(46.dp).clip(CircleShape).background(p.invText), contentAlignment = Alignment.Center) {
-            Icon(
-                if (play) Icons.Filled.PlayArrow else Icons.Filled.NorthEast,
-                contentDescription = null, tint = p.invBg, modifier = Modifier.size(18.dp),
-            )
+            Icon(if (play) Icons.Filled.PlayArrow else Icons.Filled.NorthEast, contentDescription = null, tint = p.invBg, modifier = Modifier.size(20.dp))
         }
     }
 }
 
 @Composable
-private fun Header() {
+private fun Header(name: String, streak: Int, modifier: Modifier) {
     val p = LocalPalette.current
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val greet = if (hour < 12) "صباح الخير" else "مساء الخير"
-    Column {
-        Text(SimpleDateFormat("EEEE d MMMM", Locale("ar")).format(Date()), style = txt(13, p.muted))
-        Text("$greet، $USER_NAME", style = txt(22, p.text, FontWeight.SemiBold))
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(SimpleDateFormat("EEEE d MMMM", Locale("ar")).format(Date()), style = txt(13, p.muted))
+            Text("$greet، $name", style = txt(22, p.text, FontWeight.SemiBold))
+        }
+        if (streak > 0) Row(
+            Modifier.clip(RoundedCornerShape(18.dp)).background(if (p.dark) Color(0xFF1C1D21) else Color.White).padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(Icons.Filled.LocalFireDepartment, null, tint = RunOrange, modifier = Modifier.size(18.dp))
+            Text("$streak", style = numStyle(18.sp, p.text, FontWeight.Bold))
+            Text(if (streak == 1) "يوم" else "أيام", style = txt(12, p.muted))
+        }
     }
 }
 
 @Composable
-private fun StepsHero(t: TodaySummary) {
+private fun StepsHero(t: TodaySummary, modifier: Modifier) {
     val p = LocalPalette.current
     val frac = (t.steps.toFloat() / t.stepGoal).coerceIn(0f, 1f)
     val pct = (frac * 100).toInt()
-    val sub = "$pct٪ من هدف ${t.stepGoal.grouped()} • ${"%.1f".format(Locale.US, t.distanceM / 1000)} كم".ar()
+    val sub = "$pct٪ من ${t.stepGoal.grouped()} • ${"%.1f".format(Locale.US, t.distanceM / 1000)} كم".ar()
 
     if (p.dark) {
-        ToneCard(CardTone.STEPS, Modifier.fillMaxWidth().height(200.dp), radius = 38.dp, pad = 20.dp) {
-            Column(Modifier.align(Alignment.TopStart)) { Text("خطوات اليوم", style = txt(15, Color.White)) }
+        ToneCard(CardTone.STEPS, modifier.fillMaxWidth().height(200.dp), radius = 38.dp, pad = 20.dp) {
+            Text("خطوات اليوم", style = txt(15, Color.White), modifier = Modifier.align(Alignment.TopStart))
             Column(Modifier.align(Alignment.BottomStart)) {
-                Text(t.steps.grouped(), style = dotoStyle(76.sp, Color.White))
+                CountText(t.steps, numStyle(72.sp, Color.White))
                 Text(sub, style = txt(13, Color.White.copy(alpha = 0.88f)))
             }
-            Ring(frac, Color(0xFFF5E15A), Color.White.copy(alpha = 0.35f), 96.dp, Modifier.align(Alignment.TopEnd))
+            Ring(frac, Color(0xFFF5E15A), Color.White.copy(alpha = 0.3f), 92.dp, Modifier.align(Alignment.TopEnd))
         }
     } else {
-        Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.Bottom) {
+        Row(modifier.fillMaxWidth().padding(top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.Bottom) {
             Column(Modifier.weight(1f)) {
                 Text("خطوات اليوم", style = txt(14, p.muted))
-                Text(t.steps.grouped(), style = dotoStyle(84.sp, p.text))
+                CountText(t.steps, numStyle(80.sp, p.text))
                 Text(sub, style = txt(13, p.muted))
             }
-            Ring(frac, p.text, p.line, 104.dp, Modifier.padding(bottom = 8.dp))
+            Ring(frac, p.text, p.line, 100.dp, Modifier.padding(bottom = 8.dp))
         }
     }
 }
 
 @Composable
-fun Ring(frac: Float, color: Color, track: Color, size: Dp, modifier: Modifier = Modifier) {
+fun Ring(frac: Float, color: Color, track: Color, size: Dp, modifier: Modifier = Modifier, stroke: Dp = 5.dp) {
+    val f by animateFloatAsState(frac, tween(1200, easing = FastOutSlowInEasing), label = "ring")
     Canvas(modifier.size(size)) {
-        val sw = 5.dp.toPx()
-        val inset = sw
-        val arcSize = Size(this.size.width - inset * 2, this.size.height - inset * 2)
+        val sw = stroke.toPx()
+        val arcSize = Size(this.size.width - sw * 2, this.size.height - sw * 2)
         drawCircle(track, radius = arcSize.width / 2, style = Stroke(1.5.dp.toPx()))
-        drawArc(color, -90f, 360f * frac, false, Offset(inset, inset), arcSize, style = Stroke(sw, cap = StrokeCap.Round))
+        drawArc(color, -90f, 360f * f, false, Offset(sw, sw), arcSize, style = Stroke(sw, cap = StrokeCap.Round))
     }
 }
 
@@ -228,11 +262,11 @@ private fun RowScope.StatCard(
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 if (!p.dark) CircleIcon(icon, fg, if (tone != null) Color.White.copy(alpha = 0.45f) else p.line)
-                else Text(title, style = txt(15, fg))
+                else Text(title, style = txt(15, fg), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 Spacer(Modifier.weight(1f))
-                corner?.let { Text(it, style = txt(12, sub)) }
+                corner?.let { Text(it, style = txt(11, sub), maxLines = 1) }
             }
-            if (!p.dark) Text(title, style = txt(15, fg, FontWeight.Medium))
+            if (!p.dark) Text(title, style = txt(15, fg, FontWeight.Medium), maxLines = 1)
             content(fg, sub)
         }
     }
@@ -247,40 +281,26 @@ private fun RowScope.HeartCard(t: TodaySummary) = StatCard(
 ) { fg, sub ->
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.weight(1f)) {
-            Text(t.hr?.toString() ?: "--", style = txt(34, fg, FontWeight.SemiBold))
+            if (t.hr != null) CountText(t.hr!!.toLong(), numStyle(38.sp, fg), { "$it" }) else Text("--", style = numStyle(38.sp, fg))
             Text(" ن/د", style = txt(12, sub), modifier = Modifier.padding(bottom = 6.dp))
         }
-        val lineColor = if (LocalPalette.current.dark) HeartRed else fg
-        Canvas(Modifier.size(58.dp, 26.dp)) {
-            val w = size.width; val h = size.height
-            val path = Path().apply {
-                moveTo(0f, h * 0.6f); lineTo(w * 0.2f, h * 0.6f); lineTo(w * 0.28f, h * 0.2f)
-                lineTo(w * 0.36f, h * 0.95f); lineTo(w * 0.45f, h * 0.45f); lineTo(w * 0.5f, h * 0.6f); lineTo(w, h * 0.6f)
-            }
-            drawPath(path, lineColor, style = Stroke(1.6.dp.toPx(), cap = StrokeCap.Round))
-        }
+        BeatingHeart(t.hr, if (LocalPalette.current.dark) HeartRed else fg, 22.dp)
     }
 }
 
 @Composable
 private fun RowScope.SleepCard(t: TodaySummary) = StatCard(
-    "النوم", Icons.Outlined.Bedtime, CardTone.SLEEP, corner = "أمس",
+    "النوم", Icons.Outlined.Bedtime, CardTone.SLEEP, corner = "آخر ليلة",
 ) { fg, sub ->
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         val m = t.sleepMin
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.weight(1f)) {
-            if (m == null) Text("--", style = txt(34, fg, FontWeight.SemiBold))
+            if (m == null) Text("--", style = numStyle(38.sp, fg))
             else {
-                Text("${m / 60}", style = txt(34, fg, FontWeight.SemiBold))
+                Text("${m / 60}", style = numStyle(38.sp, fg))
                 Text("س ", style = txt(12, sub), modifier = Modifier.padding(bottom = 6.dp))
-                Text("${m % 60}", style = txt(34, fg, FontWeight.SemiBold))
+                Text("${m % 60}", style = numStyle(38.sp, fg))
                 Text("د", style = txt(12, sub), modifier = Modifier.padding(bottom = 6.dp))
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
-            listOf(10, 20, 14, 26, 18, 8).forEachIndexed { i, hgt ->
-                Box(Modifier.width(4.dp).height(hgt.dp).clip(RoundedCornerShape(2.dp))
-                    .background(if (i % 2 == 1) fg else fg.copy(alpha = 0.35f)))
             }
         }
     }
@@ -289,15 +309,13 @@ private fun RowScope.SleepCard(t: TodaySummary) = StatCard(
 @Composable
 private fun RowScope.MinutesCard(t: TodaySummary) = StatCard(
     "دقائق التمرين", Icons.Outlined.Timer, CardTone.MINUTES, CardTone.MINUTES_LIGHT,
-    corner = "الهدف ${t.exerciseGoalMin}".ar(),
+    corner = "/ ${t.exerciseGoalMin}".ar(),
 ) { fg, _ ->
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("${t.exerciseMin}", style = txt(34, fg, FontWeight.SemiBold), modifier = Modifier.weight(1f))
+        CountText(t.exerciseMin.toLong(), numStyle(38.sp, fg), { "$it" }, Modifier.weight(1f))
         val filled = ((t.exerciseMin.toFloat() / t.exerciseGoalMin) * 7).toInt().coerceIn(0, 7)
         Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-            repeat(7) { i ->
-                Box(Modifier.size(6.dp).clip(CircleShape).background(if (i < filled) fg else fg.copy(alpha = 0.4f)))
-            }
+            repeat(7) { i -> Box(Modifier.size(6.dp).clip(CircleShape).background(if (i < filled) fg else fg.copy(alpha = 0.35f))) }
         }
     }
 }
@@ -306,14 +324,38 @@ private fun RowScope.MinutesCard(t: TodaySummary) = StatCard(
 private fun RowScope.WorkoutsCard(t: TodaySummary) = StatCard(
     "التمارين", Icons.Outlined.CalendarMonth, CardTone.WORKOUTS,
 ) { fg, sub ->
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Bottom) {
+    Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.Bottom) {
         Column {
-            Text("${t.workoutsWeek}", style = txt(34, fg, FontWeight.SemiBold))
+            CountText(t.workoutsWeek.toLong(), numStyle(38.sp, fg), { "$it" })
             Text("الأسبوع", style = txt(11, sub))
         }
         Column {
-            Text("${t.workoutsMonth}", style = txt(34, sub, FontWeight.SemiBold))
+            CountText(t.workoutsMonth.toLong(), numStyle(38.sp, sub), { "$it" })
             Text("الشهر", style = txt(11, sub))
+        }
+    }
+}
+
+@Composable
+fun WeekGoalCard(km: Double, goalKm: Int, modifier: Modifier = Modifier) {
+    val frac = (km / goalKm.coerceAtLeast(1)).toFloat().coerceIn(0f, 1f)
+    val f by animateFloatAsState(frac, tween(1200, easing = FastOutSlowInEasing), label = "goal")
+    ToneCard(CardTone.GOAL, modifier.fillMaxWidth(), radius = 30.dp, pad = 18.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f)) {
+                    Text("هدف الأسبوع", style = txt(14, Color.White))
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text("%.1f".format(Locale.US, km), style = numStyle(34.sp, Color.White))
+                        Text(" / $goalKm كم", style = txt(13, Color.White.copy(alpha = 0.85f)), modifier = Modifier.padding(bottom = 5.dp))
+                    }
+                }
+                Text(if (frac >= 1f) "حققته!" else "باقي ${"%.1f".format(Locale.US, (goalKm - km).coerceAtLeast(0.0))} كم".ar(),
+                    style = txt(13, if (frac >= 1f) FootballGreen else Color.White.copy(alpha = 0.9f), FontWeight.Medium))
+            }
+            Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Color.White.copy(alpha = 0.18f))) {
+                Box(Modifier.fillMaxWidth(f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(FootballGreen))
+            }
         }
     }
 }
@@ -325,34 +367,34 @@ fun typeIcon(type: WorkoutType, runM: Double = 0.0): ImageVector = when {
 }
 
 @Composable
-fun WorkoutRow(w: Workout, onClick: () -> Unit) {
+fun WorkoutRow(w: Workout, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val p = LocalPalette.current
-    val time = SimpleDateFormat("h:mm a", Locale("ar")).format(Date(w.startMs))
-    PlainCard(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    val time = SimpleDateFormat("EEE h:mm a", Locale("ar")).format(Date(w.startMs))
+    PlainCard(modifier.fillMaxWidth().bounceClick(onClick = onClick)) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CircleIcon(typeIcon(w.type, w.runM), p.invText, p.line, 44.dp, filled = p.invBg)
                 Column(Modifier.weight(1f)) {
                     Text(w.title, style = txt(15, p.text, FontWeight.SemiBold))
-                    Text("$time • ${if (w.source == "watch") "الساعة" else "الجوال"}" + if (w.hcSynced) " ✓" else "", style = txt(12, p.muted))
+                    Text("$time • ${if (w.source == "watch") "الساعة" else "الجوال"}", style = txt(12, p.muted), maxLines = 1)
                 }
-                Column {
+                Column(horizontalAlignment = Alignment.End) {
                     if (w.type == WorkoutType.FOOTBALL) {
-                        Text("${w.durationMs / 60_000} د".ar(), style = txt(22, p.text, FontWeight.SemiBold))
-                        Text("${Fmt.dist(w.distanceM)} كم • ${w.sprints} سبرنت".ar(), style = txt(12, p.muted))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text("${w.activeMs / 60_000}", style = numStyle(26.sp, p.text))
+                            Text(" د", style = txt(12, p.muted))
+                        }
+                        Text("${w.sprints} سبرنت".ar(), style = txt(12, p.muted))
                     } else {
-                        Text("${Fmt.dist(w.distanceM)} كم", style = txt(22, p.text, FontWeight.SemiBold))
-                        Text("${w.durationMs / 60_000} د • ${Fmt.pace(w.avgPaceSec)} /كم".ar(), style = txt(12, p.muted))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(Fmt.dist(w.distanceM), style = numStyle(26.sp, p.text))
+                            Text(" كم", style = txt(12, p.muted))
+                        }
+                        Text("${Fmt.duration(w.activeMs)} • ${Fmt.pace(w.avgPaceSec)}", style = numStyle(13.sp, p.muted, FontWeight.SemiBold))
                     }
                 }
             }
-            if (w.type != WorkoutType.FOOTBALL && w.segments.size > 1) {
-                SegmentBar(w.segments, 8.dp)
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Legend(WalkBlue, "مشي ${"%.1f".format(Locale.US, w.walkM / 1000)} كم".ar())
-                    Legend(RunOrange, "جري ${"%.1f".format(Locale.US, w.runM / 1000)} كم".ar())
-                }
-            }
+            if (w.type != WorkoutType.FOOTBALL && w.segments.size > 1) SegmentBar(w.segments, 8.dp)
         }
     }
 }
@@ -367,17 +409,17 @@ fun Legend(c: Color, label: String) {
 }
 
 @Composable
-fun SegmentBar(segments: List<Segment>, height: Dp, tail: Float = 0f) {
+fun SegmentBar(segments: List<Segment>, height: Dp) {
     val total = segments.sumOf { it.distanceM }.toFloat()
     Row(Modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(height / 2)), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         if (total <= 0f) {
-            Box(Modifier.fillMaxSize().background(Color(0xFF2A2D33)))
+            Box(Modifier.fillMaxSize().background(Color(0x332A2D33)))
         } else {
             segments.forEach { s ->
                 val f = (s.distanceM / total).toFloat()
                 if (f > 0.005f) Box(Modifier.weight(f).fillMaxSize().background(if (s.mode == Mode.RUN) RunOrange else WalkBlue))
             }
-            if (tail > 0f) Box(Modifier.weight(tail).fillMaxSize().background(Color(0xFF2A2D33)))
         }
     }
 }
+

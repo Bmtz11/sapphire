@@ -29,6 +29,8 @@ class TtsSpeaker(context: Context) : TextToSpeech.OnInitListener {
 
     var arabicAvailable = false; private set
     var fallback: ((String) -> Unit)? = null
+    var rate: Float = 1.0f
+        set(v) { field = v; if (ready) tts.setSpeechRate(v) }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
@@ -36,7 +38,7 @@ class TtsSpeaker(context: Context) : TextToSpeech.OnInitListener {
             if (r < 0) r = tts.setLanguage(Locale("ar"))
             arabicAvailable = r >= 0
             tts.setAudioAttributes(attrs)
-            tts.setSpeechRate(1.0f)
+            tts.setSpeechRate(rate)
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(id: String?) {}
                 override fun onDone(id: String?) { if (!tts.isSpeaking) audio.abandonAudioFocusRequest(focus) }

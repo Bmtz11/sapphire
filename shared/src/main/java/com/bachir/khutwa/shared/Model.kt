@@ -13,6 +13,37 @@ enum class Mode { WALK, RUN }
 /** What the user picked before starting. */
 enum class WorkoutType(val ar: String) { WALK("مشي"), RUN("جري"), FOOTBALL("كرة قدم") }
 
+/** Workout settings shared by phone and watch (the phone pushes its copy to the watch). */
+@Serializable
+data class CoachConfig(
+    val coachOn: Boolean = true,
+    val announceEveryM: Int = 1000,     // 500 or 1000
+    val maxHr: Int = 190,
+    val hrAlertZone: Int = 0,           // 0 = off, else alert when above this zone (1..4)
+    val goalM: Int = 0,                 // 0 = no goal for the session
+    val runSpeedKmh: Double = 7.4,
+    val autoPause: Boolean = false,
+) {
+    companion object {
+        fun encode(c: CoachConfig) = WorkoutJson.json.encodeToString(serializer(), c)
+        fun decode(s: String) = WorkoutJson.json.decodeFromString(serializer(), s)
+    }
+}
+
+/** Heart-rate zone 1..5 from % of max HR (50/60/70/80/90). */
+fun hrZone(hr: Int?, maxHr: Int): Int {
+    if (hr == null || hr <= 0) return 0
+    val pct = hr * 100 / maxHr
+    return when {
+        pct >= 90 -> 5
+        pct >= 80 -> 4
+        pct >= 70 -> 3
+        pct >= 60 -> 2
+        pct >= 50 -> 1
+        else -> 0
+    }
+}
+
 /** Today's numbers the phone reads from Health Connect and pushes to the watch. */
 @Serializable
 data class TodaySummary(
@@ -65,14 +96,17 @@ data class Workout(
     val type: WorkoutType = WorkoutType.WALK,
     val sprints: Int = 0,
     val maxSpeedMps: Double = 0.0,
+    val pausedMs: Long = 0,
 ) {
+    /** Time actually moving (pauses removed). */
+    val activeMs get() = (endMs - startMs - pausedMs).coerceAtLeast(0)
     val title get() = when {
         type == WorkoutType.FOOTBALL -> "كرة قدم"
         runM > 50 && walkM > 50 -> "مشي + جري"
         runM > 50 -> "جري"
         else -> "مشي"
     }
-    val avgPaceSec get() = if (distanceM > 50) ((durationMs / 1000.0) / (distanceM / 1000.0)).toInt() else null
+    val avgPaceSec get() = if (distanceM > 50) ((activeMs / 1000.0) / (distanceM / 1000.0)).toInt() else null
     val durationMs get() = endMs - startMs
     val runM get() = segments.filter { it.mode == Mode.RUN }.sumOf { it.distanceM }
     val walkM get() = segments.filter { it.mode == Mode.WALK }.sumOf { it.distanceM }
@@ -93,6 +127,9 @@ data class LiveStats(
     val sprints: Int = 0,
     /** Segments so far, for the live walk/run bar. */
     val segments: List<Segment> = emptyList(),
+    val paused: Boolean = false,
+    val zone: Int = 0,
+    val goalM: Int = 0,
 )
 
 /** Live state shared between the service and the UI of the same app. */
