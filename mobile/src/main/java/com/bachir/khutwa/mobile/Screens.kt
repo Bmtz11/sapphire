@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -380,6 +381,8 @@ fun ZoneBar(zone: Int, alertZone: Int) {
 fun DetailScreen(w: Workout, onBack: () -> Unit, onDelete: () -> Unit) {
     val p = LocalPalette.current
     var askDelete by remember { mutableStateOf(false) }
+    var fullMap by remember { mutableStateOf(false) }
+    if (fullMap) FullMap(w, p.dark) { fullMap = false }
     val date = SimpleDateFormat("EEEE d MMM • h:mm a", Locale("ar")).format(Date(w.startMs))
 
     LazyColumn(
@@ -403,9 +406,14 @@ fun DetailScreen(w: Workout, onBack: () -> Unit, onDelete: () -> Unit) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     RouteMap(w, p.dark, Modifier.fillMaxSize())
                 }
+                Box(Modifier.matchParentSize().bounceClick { fullMap = true })
                 if (w.type != WorkoutType.FOOTBALL) Row(
                     Modifier.align(Alignment.TopStart).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) { MapChip(WalkBlue, "مشي"); MapChip(RunOrange, "جري") }
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(14.dp).size(40.dp).clip(CircleShape).background(Color.White),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Filled.OpenInFull, "ملء الشاشة", tint = Color(0xFF0B0B0C), modifier = Modifier.size(18.dp)) }
                 Row(
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp)
                         .clip(RoundedCornerShape(28.dp)).background(Color(0xE6141518)).padding(horizontal = 18.dp, vertical = 14.dp),
