@@ -48,9 +48,9 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
         private const val ACTION_SPEAK = "speak"
         private const val ACTION_PAUSE = "pause"
         private const val ACTION_RESUME = "resume"
-        fun start(ctx: Context, type: WorkoutType, goalM: Int) = ctx.startForegroundService(
+        fun start(ctx: Context, type: WorkoutType, goalM: Int, goalSec: Int = 0) = ctx.startForegroundService(
             Intent(ctx, PhoneWorkoutService::class.java).setAction(ACTION_START)
-                .putExtra("type", type.name).putExtra("goal", goalM)
+                .putExtra("type", type.name).putExtra("goal", goalM).putExtra("goalSec", goalSec)
         )
         fun stop(ctx: Context) = send(ctx, ACTION_STOP)
         fun speakStatus(ctx: Context) = send(ctx, ACTION_SPEAK)
@@ -79,6 +79,7 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
             ACTION_START -> startWorkout(
                 runCatching { WorkoutType.valueOf(intent.getStringExtra("type") ?: "") }.getOrDefault(WorkoutType.WALK),
                 intent.getIntExtra("goal", 0),
+                intent.getIntExtra("goalSec", 0),
             )
             ACTION_STOP -> stopWorkout()
             ACTION_SPEAK -> speaker.speak(ArabicCoach.status(LiveSession.stats.value))
@@ -91,7 +92,7 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
     private fun publish() { recorder?.let { LiveSession.stats.value = it.stats(System.currentTimeMillis()) } }
 
     @SuppressLint("MissingPermission")
-    private fun startWorkout(type: WorkoutType, goalM: Int) {
+    private fun startWorkout(type: WorkoutType, goalM: Int, goalSec: Int) {
         if (recorder != null) return
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         ServiceCompat.startForeground(
@@ -99,20 +100,31 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
         )
         val now = System.currentTimeMillis()
-        recorder = WorkoutRecorder(UUID.randomUUID().toString(), now, "phone", type, Settings.current.coach(goalM))
+        val r = WorkoutRecorder(UUID.randomUUID().toString(), now, "phone", type, Settings.current.coach(goalM, goalSec))
+        recorder = r
+        weatherAsked = false
         LiveSession.lastWorkout.value = null
         publish()
 
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
-            .setMinUpdateIntervalMillis(1000L).build()
-        fused.requestLocationUpdates(req, locationCallback, Looper.getMainLooper())
-        sensors.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let {
-            sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
+        if (type.gps) {
+            val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
+                .setMinUpdateIntervalMillis(1000L).build()
+            fused.requestLocationUpdates(req, locationCallback, Looper.getMainLooper())
+        } else fetchWeatherFromLastLocation()
+        sensors.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST) }
+        sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST) }
+        sensors.getDefaultSensor(Sensor.TYPE_PRESSURE)?.let {
+            r.elevationFromBaro = true
+            sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
         }
         if (coachOn) speaker.speak(ArabicCoach.start(type))
+        r.firstInterval()?.let { if (coachOn) speaker.speak(ArabicCoach.phrase(it)) }
 
         ticker = lifecycleScope.launch {
-            while (isActive) { publish(); delay(1000) }
+            while (isActive) {
+                recorder?.tick(System.currentTimeMillis())?.forEach { speaker.speak(ArabicCoach.phrase(it)) }
+                publish(); delay(1000)
+            }
         }
     }
 
@@ -145,12 +157,39 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
                 )
                 r.onLocation(p, if (l.hasSpeed()) l.speed.toDouble() else null)
                     .forEach { speaker.speak(ArabicCoach.phrase(it)) }
+                if (!weatherAsked && (!l.hasAccuracy() || l.accuracy < 100)) { weatherAsked = true; fetchWeather(l.latitude, l.longitude) }
             }
         }
     }
 
+    private var weatherAsked = false
+    private var lastBaroT = 0L
+
+    private fun fetchWeather(lat: Double, lon: Double) {
+        if (!Settings.current.weatherOn) return
+        AppScope.launch { WeatherClient.fetch(lat, lon)?.let { w -> recorder?.setWeather(w) } }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun fetchWeatherFromLastLocation() {
+        fused.lastLocation.addOnSuccessListener { l -> l?.let { weatherAsked = true; fetchWeather(it.latitude, it.longitude) } }
+    }
+
     override fun onSensorChanged(event: SensorEvent) {
         val t = System.currentTimeMillis()
+        when (event.sensor.type) {
+            Sensor.TYPE_STEP_COUNTER -> {
+                recorder?.onStepTotal(t, event.values[0].toLong())?.forEach { speaker.speak(ArabicCoach.phrase(it)) }
+                return
+            }
+            Sensor.TYPE_PRESSURE -> {
+                if (t - lastBaroT >= 1000) {
+                    lastBaroT = t
+                    recorder?.onAltitude(SensorManager.getAltitude(SensorManager.PRESSURE_STANDARD_ATMOSPHERE, event.values[0]).toDouble())
+                }
+                return
+            }
+        }
         steps.addLast(t)
         while (steps.isNotEmpty() && steps.first() < t - 15_000) steps.removeFirst()
         if (steps.size >= 6) {
@@ -184,7 +223,10 @@ class WatchListenerService : WearableListenerService() {
                 runCatching {
                     val client = Wearable.getDataClient(applicationContext)
                     val bytes = client.getFdForAsset(asset).await().inputStream.use { it.readBytes() }
-                    val w = WorkoutJson.ungzip(bytes)
+                    var w = WorkoutJson.ungzip(bytes)
+                    val first = w.points.firstOrNull()
+                    if (w.weather == null && first != null && System.currentTimeMillis() - w.startMs < 4 * 3600_000L && Settings.current.weatherOn)
+                        WeatherClient.fetch(first.lat, first.lon)?.let { w = w.copy(weather = it) }
                     WorkoutStore.saveAndSync(applicationContext, w)
                     client.deleteDataItems(uri).await()
                 }

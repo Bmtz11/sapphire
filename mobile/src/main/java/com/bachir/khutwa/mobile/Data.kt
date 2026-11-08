@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.ElevationGainedRecord
 import androidx.health.connect.client.records.ExerciseRoute
 import androidx.health.connect.client.records.ExerciseSegment
 import androidx.health.connect.client.records.ExerciseSessionRecord
@@ -79,7 +80,10 @@ object HealthSync {
         HealthPermission.getWritePermission(DistanceRecord::class),
         HealthPermission.PERMISSION_WRITE_EXERCISE_ROUTE,
     )
-    val PERMISSIONS = WRITE + TodayReader.READ
+    val PERMISSIONS = WRITE + TodayReader.READ + setOf(
+        Water.WRITE, Water.READ,
+        HealthPermission.getWritePermission(ElevationGainedRecord::class),
+    )
 
     fun available(ctx: Context) =
         HealthConnectClient.getSdkStatus(ctx) == HealthConnectClient.SDK_AVAILABLE
@@ -100,10 +104,13 @@ object HealthSync {
         val device = Device(type = if (w.source == "watch") Device.TYPE_WATCH else Device.TYPE_PHONE)
         val hasRun = w.runM > 50
         val football = w.type == WorkoutType.FOOTBALL
-        val type = when {
-            football -> ExerciseSessionRecord.EXERCISE_TYPE_SOCCER
-            hasRun || w.type == WorkoutType.RUN -> ExerciseSessionRecord.EXERCISE_TYPE_RUNNING
-            else -> ExerciseSessionRecord.EXERCISE_TYPE_WALKING
+        val type = when (w.type) {
+            WorkoutType.FOOTBALL -> ExerciseSessionRecord.EXERCISE_TYPE_SOCCER
+            WorkoutType.HIKE -> ExerciseSessionRecord.EXERCISE_TYPE_HIKING
+            WorkoutType.CYCLING -> ExerciseSessionRecord.EXERCISE_TYPE_BIKING
+            WorkoutType.TREADMILL -> if (hasRun) ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL else ExerciseSessionRecord.EXERCISE_TYPE_WALKING
+            WorkoutType.RUN, WorkoutType.INTERVALS -> ExerciseSessionRecord.EXERCISE_TYPE_RUNNING
+            WorkoutType.WALK -> if (hasRun) ExerciseSessionRecord.EXERCISE_TYPE_RUNNING else ExerciseSessionRecord.EXERCISE_TYPE_WALKING
         }
 
         val route = w.points.filter { it.t in w.startMs..w.endMs }.map {
@@ -135,11 +142,20 @@ object HealthSync {
             exerciseRoute = route,
         )
         // If Health Connect rejects the segment mix for this exercise type, save the session without segments.
-        val record = if (football) session(emptyList())
+        val record = if (!w.type.walkRun || w.type == WorkoutType.HIKE) session(emptyList())
         else runCatching { session(segments) }.getOrElse { session(emptyList()) }
 
+        val granted = client.permissionController.getGrantedPermissions()
         val records = buildList {
             add(record)
+            if (w.ascentM >= 1 && HealthPermission.getWritePermission(ElevationGainedRecord::class) in granted) add(
+                ElevationGainedRecord(
+                    startTime = start, startZoneOffset = rules.getOffset(start),
+                    endTime = end, endZoneOffset = rules.getOffset(end),
+                    elevation = Length.meters(w.ascentM),
+                    metadata = Metadata.activelyRecorded(device = device, clientRecordId = w.id + "-e", clientRecordVersion = 1L),
+                )
+            )
             if (w.distanceM >= 1) add(
                 DistanceRecord(
                     startTime = start, startZoneOffset = rules.getOffset(start),

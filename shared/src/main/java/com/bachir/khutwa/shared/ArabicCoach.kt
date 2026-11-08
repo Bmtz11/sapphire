@@ -10,6 +10,10 @@ object ArabicCoach {
         WorkoutType.WALK -> "بدأنا المشي. أول ما تبدأ تجري بنتبه لك."
         WorkoutType.RUN -> "بدأنا الجري. بعطيك وتيرتك كل كيلو."
         WorkoutType.FOOTBALL -> "بدأت المباراة. بالتوفيق."
+        WorkoutType.INTERVALS -> "بدأنا الجري المخصص."
+        WorkoutType.HIKE -> "بدأنا الهايكنج. بحسب لك الصعود والنزول."
+        WorkoutType.TREADMILL -> "بدأنا التمرين الداخلي. المسافة من خطواتك."
+        WorkoutType.CYCLING -> "بدأنا ركوب الدراجة."
     }
 
     fun phrase(e: CoachEvent): String = when (e) {
@@ -26,6 +30,16 @@ object ArabicCoach {
         is CoachEvent.GoalHalf -> "وصلت نص الهدف. باقي ${distance(e.goalM / 2.0)}."
         is CoachEvent.GoalReached -> "مبروك! حققت هدف ${distance(e.goalM.toDouble())} في ${duration(e.elapsedMs)}."
         is CoachEvent.ZoneHigh -> "نبضك ${e.hr}، أنت في المنطقة ${e.zone}. خفف شوي."
+        is CoachEvent.TimeHalf -> "مر نص الوقت. باقي ${duration(e.goalSec * 500L)}."
+        is CoachEvent.TimeLeft -> "باقي دقيقة وحدة. شد حيلك."
+        is CoachEvent.TimeReached -> "خلص الوقت! قطعت ${distance(e.distanceM)}."
+        is CoachEvent.IntervalNext -> buildString {
+            append("${e.step.label}.")
+            if (e.index == 0 && e.total > 1) append(" عندك ${e.total} مراحل.")
+            e.next?.let { append(" بعدها ${it.label}.") }
+        }
+        CoachEvent.IntervalsDone -> "خلصت التمرين المخصص. عاش! تقدر تكمل أو تنهي."
+        is CoachEvent.IntervalCountdown -> "${e.sec}"
         CoachEvent.AutoPaused -> "إيقاف مؤقت."
         CoachEvent.AutoResumed -> "كملنا."
     }
@@ -44,7 +58,9 @@ object ArabicCoach {
     }
 
     fun finish(w: Workout) = buildString {
-        append("انتهى التمرين. المسافة ${distance(w.distanceM)} في ${duration(w.durationMs)}.")
+        append("انتهى التمرين. المسافة ${distance(w.distanceM)} في ${duration(w.activeMs)}.")
+        if (w.kcal > 20) append(" حرقت تقريباً ${w.kcal} سعرة.")
+        if (w.ascentM > 15) append(" صعدت ${w.ascentM.roundToInt()} متر.")
         if (w.type == WorkoutType.FOOTBALL) {
             if (w.sprints > 0) append(" سويت ${w.sprints} سبرنت.")
             if (w.maxSpeedMps > 0) append(" أعلى سرعة ${(w.maxSpeedMps * 3.6).roundToInt()} كيلو بالساعة.")

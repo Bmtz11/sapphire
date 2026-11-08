@@ -59,6 +59,7 @@ class ExerciseService : LifecycleService() {
     private lateinit var speaker: TtsSpeaker
     private var recorder: WorkoutRecorder? = null
     private var ticker: Job? = null
+    private var stepsTotal = 0L
     /** Coach settings pushed from the phone (defaults if the phone hasn't sent any yet). */
     private val coach get() = WatchToday.coach.value
 
@@ -101,11 +102,16 @@ class ExerciseService : LifecycleService() {
         val now = System.currentTimeMillis()
         val r = WorkoutRecorder(UUID.randomUUID().toString(), now, "watch", type, coach)
         recorder = r
+        r.onStepTotal(now, 0)
         LiveSession.lastWorkout.value = null
         LiveSession.stats.value = r.stats(now)
+        stepsTotal = 0L
         val hsType = when (type) {
             WorkoutType.WALK -> ExerciseType.WALKING
-            WorkoutType.RUN -> ExerciseType.RUNNING
+            WorkoutType.RUN, WorkoutType.INTERVALS -> ExerciseType.RUNNING
+            WorkoutType.HIKE -> ExerciseType.HIKING
+            WorkoutType.TREADMILL -> ExerciseType.RUNNING_TREADMILL
+            WorkoutType.CYCLING -> ExerciseType.BIKING
             WorkoutType.FOOTBALL -> ExerciseType.SOCCER
         }
 
@@ -114,7 +120,9 @@ class ExerciseService : LifecycleService() {
             val typeCaps = caps.getExerciseTypeCapabilities(hsType)
             val wanted: Set<DataType<*, *>> = setOf<DataType<*, *>>(
                 DataType.HEART_RATE_BPM, DataType.SPEED, DataType.LOCATION, DataType.STEPS_PER_MINUTE,
-            ).filter { it in typeCaps.supportedDataTypes }.toSet()
+                DataType.STEPS, DataType.ABSOLUTE_ELEVATION,
+            ).filter { it in typeCaps.supportedDataTypes && (type.gps || (it != DataType.LOCATION && it != DataType.SPEED)) }.toSet()
+            if (DataType.ABSOLUTE_ELEVATION in wanted) r.elevationFromBaro = true
 
             client.setUpdateCallback(callback)
             val config = ExerciseConfig.builder(hsType)
@@ -123,12 +131,19 @@ class ExerciseService : LifecycleService() {
                 .setIsAutoPauseAndResumeEnabled(false)
                 .build()
             client.startExerciseAsync(config).await()
-            if (coach.coachOn) speaker.speak(ArabicCoach.start(type))
+            if (coach.coachOn) {
+                speaker.speak(ArabicCoach.start(type))
+                r.firstInterval()?.let { speaker.speak(ArabicCoach.phrase(it)) }
+            }
         }
 
         ticker = lifecycleScope.launch {
             while (isActive) {
-                recorder?.let { LiveSession.stats.value = it.stats(System.currentTimeMillis()) }
+                recorder?.let {
+                    val t = System.currentTimeMillis()
+                    it.tick(t).forEach { e -> speaker.speak(ArabicCoach.phrase(e)) }
+                    LiveSession.stats.value = it.stats(t)
+                }
                 delay(1000)
             }
         }
@@ -165,6 +180,12 @@ class ExerciseService : LifecycleService() {
             m.getData(DataType.STEPS_PER_MINUTE).lastOrNull()?.let {
                 r.onCadence(it.getTimeInstant(boot).toEpochMilli(), it.value.toDouble())
             }
+            val stepDelta = m.getData(DataType.STEPS).sumOf { it.value }
+            if (stepDelta > 0) {
+                stepsTotal += stepDelta
+                r.onStepTotal(System.currentTimeMillis(), stepsTotal).forEach { speaker.speak(ArabicCoach.phrase(it)) }
+            }
+            m.getData(DataType.ABSOLUTE_ELEVATION).lastOrNull()?.let { r.onAltitude(it.value) }
             m.getData(DataType.SPEED).forEach { r.onSpeed(it.getTimeInstant(boot).toEpochMilli(), it.value) }
             m.getData(DataType.LOCATION).forEach { dp ->
                 val l = dp.value

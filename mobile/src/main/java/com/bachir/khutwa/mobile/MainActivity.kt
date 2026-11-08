@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { HOME, START, COUNTDOWN, STATS, SETTINGS, DETAIL, LIVE }
+private enum class Screen { HOME, START, PLAN, COUNTDOWN, STATS, SETTINGS, DETAIL, LIVE }
 
 private fun runtimePermissions() = buildList {
     add(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -99,9 +99,25 @@ private fun App(keepScreen: (Boolean) -> Unit) {
     var openId by remember { mutableStateOf<String?>(null) }
     var pendingType by remember { mutableStateOf(WorkoutType.WALK) }
     var pendingGoal by remember { mutableIntStateOf(0) }
+    var pendingGoalSec by remember { mutableIntStateOf(0) }
+    var editPlanId by remember { mutableStateOf<String?>(null) }
+    val phoneSteps by PhoneSteps.today.collectAsState()
+    val waterMl by Water.todayMl.collectAsState()
+    val weather by WeatherClient.now.collectAsState()
     var hcGranted by remember { mutableStateOf(true) }
 
+    fun hasPerm(p: String) = androidx.core.content.ContextCompat.checkSelfPermission(ctx, p) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun refreshWeather() {
+        if (!set.weatherOn || !hasPerm(Manifest.permission.ACCESS_COARSE_LOCATION)) return
+        com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(ctx).lastLocation
+            .addOnSuccessListener { l -> l?.let { scope.launch { WeatherClient.fetch(it.latitude, it.longitude) } } }
+    }
+
     fun refresh() = scope.launch {
+        if (hasPerm(Manifest.permission.ACTIVITY_RECOGNITION)) PhoneSteps.start(ctx)
+        refreshWeather()
         WorkoutStore.refresh(ctx)
         hcGranted = HealthSync.allGranted(ctx)
         TodayReader.refresh(ctx)
@@ -112,8 +128,13 @@ private fun App(keepScreen: (Boolean) -> Unit) {
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (it[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
             if (set.countdown) screen = Screen.COUNTDOWN
-            else { PhoneWorkoutService.start(ctx, pendingType, pendingGoal); screen = Screen.HOME }
+            else { PhoneWorkoutService.start(ctx, pendingType, pendingGoal, pendingGoalSec); screen = Screen.HOME }
         }
+    }
+    // first launch: steps + location so the home screen is alive straight away
+    val firstPerms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refresh() }
+    LaunchedEffect(Unit) {
+        if (!hasPerm(Manifest.permission.ACTIVITY_RECOGNITION) || !hasPerm(Manifest.permission.ACCESS_FINE_LOCATION)) firstPerms.launch(runtimePermissions())
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh() }
@@ -142,15 +163,20 @@ private fun App(keepScreen: (Boolean) -> Unit) {
             when (sc) {
                 Screen.LIVE -> live?.let { LiveScreen(it) }
                 Screen.COUNTDOWN -> CountdownScreen(pendingType) {
-                    PhoneWorkoutService.start(ctx, pendingType, pendingGoal)
+                    PhoneWorkoutService.start(ctx, pendingType, pendingGoal, pendingGoalSec)
                     screen = Screen.HOME
                 }
                 Screen.START -> {
                     BackHandler { screen = Screen.HOME }
                     StartScreen(
                         onBack = { screen = Screen.HOME },
-                        onStart = { type, goal -> pendingType = type; pendingGoal = goal; permLauncher.launch(runtimePermissions()) },
+                        onEditPlan = { editPlanId = it; screen = Screen.PLAN },
+                        onStart = { type, goal, goalSec -> pendingType = type; pendingGoal = goal; pendingGoalSec = goalSec; permLauncher.launch(runtimePermissions()) },
                     )
+                }
+                Screen.PLAN -> {
+                    BackHandler { screen = Screen.START }
+                    PlanEditor(editPlanId) { screen = Screen.START }
                 }
                 Screen.STATS -> {
                     BackHandler { screen = Screen.HOME }
@@ -168,7 +194,12 @@ private fun App(keepScreen: (Boolean) -> Unit) {
                     }
                 }
                 Screen.HOME -> HomeScreen(
-                    today = today,
+                    today0 = today,
+                    phoneSteps = phoneSteps,
+                    waterMl = waterMl,
+                    weather = weather,
+                    tips = Tips.build(today, waterMl, set.waterGoal, workouts, TodayReader.streak(activeDays), weather),
+                    onWater = { ml -> scope.launch { Water.add(ctx, ml) } },
                     workouts = workouts,
                     streak = TodayReader.streak(activeDays),
                     showConnect = HealthSync.available(ctx) && !hcGranted,

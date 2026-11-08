@@ -158,6 +158,21 @@ enum class CardTone(val base: Color, val blobs: List<Blob>, val linear: Brush? =
     WALK(Color(0xFF2A6FD6), listOf(Blob(Color(0xFF071433), 0.25f, 0.3f, 0.75f), Blob(Color(0xCC8CBEFF), 1.0f, 1.1f, 0.7f))),
     RUN(Color(0xFFC4532E), listOf(Blob(Color(0xE63C50F0), 0.25f, 0.35f, 0.55f))),
     FOOTBALL(Color(0xFF2E4A3A), listOf(Blob(Color(0x8CA0D278), 0.9f, 0.0f, 1.1f), Blob(Color(0xFF050805), 0.1f, 1.0f, 0.7f))),
+    INTERVALS(Color(0xFF6A2C8C), listOf(Blob(Color(0xCCFF5AA5), 0.9f, 0.1f, 0.8f), Blob(Color(0xFF12051C), 0.15f, 0.9f, 0.6f))),
+    HIKE(Color(0xFF5A4A2E), listOf(Blob(Color(0x99E0B060), 0.85f, 0.05f, 0.9f), Blob(Color(0xFF0F0B05), 0.1f, 0.95f, 0.65f))),
+    TREADMILL(Color(0xFF2B2F45), listOf(Blob(Color(0x997F8CFF), 0.85f, 0.1f, 0.9f), Blob(Color(0xFF07080F), 0.15f, 0.9f, 0.6f))),
+    CYCLING(Color(0xFF0F5A5E), listOf(Blob(Color(0x9946E0D0), 0.85f, 0.05f, 0.9f), Blob(Color(0xFF031314), 0.1f, 0.95f, 0.65f))),
+    WATER(Color(0xFF0E3B66), listOf(Blob(Color(0xAA4FC3F7), 0.85f, 0.1f, 0.9f), Blob(Color(0xFF04101C), 0.1f, 0.95f, 0.6f))),
+}
+
+fun toneFor(type: com.bachir.khutwa.shared.WorkoutType) = when (type) {
+    com.bachir.khutwa.shared.WorkoutType.WALK -> CardTone.WALK
+    com.bachir.khutwa.shared.WorkoutType.RUN -> CardTone.RUN
+    com.bachir.khutwa.shared.WorkoutType.INTERVALS -> CardTone.INTERVALS
+    com.bachir.khutwa.shared.WorkoutType.HIKE -> CardTone.HIKE
+    com.bachir.khutwa.shared.WorkoutType.TREADMILL -> CardTone.TREADMILL
+    com.bachir.khutwa.shared.WorkoutType.CYCLING -> CardTone.CYCLING
+    com.bachir.khutwa.shared.WorkoutType.FOOTBALL -> CardTone.FOOTBALL
 }
 
 @Composable

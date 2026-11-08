@@ -4,6 +4,9 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.Path
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +34,10 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SportsSoccer
+import androidx.compose.material.icons.filled.Terrain
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -80,7 +87,12 @@ fun weekStartMs(): Long = Calendar.getInstance().apply {
 
 @Composable
 fun HomeScreen(
-    today: TodaySummary,
+    today0: TodaySummary,
+    phoneSteps: Long,
+    waterMl: Int,
+    weather: com.bachir.khutwa.shared.WeatherInfo?,
+    tips: List<Tips.Tip>,
+    onWater: (Int) -> Unit,
     workouts: List<Workout>,
     streak: Int,
     showConnect: Boolean,
@@ -92,6 +104,7 @@ fun HomeScreen(
 ) {
     val p = LocalPalette.current
     val set = Settings.current
+    val today = today0.copy(steps = maxOf(today0.steps, phoneSteps))
     val dayStart = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }.timeInMillis
@@ -109,7 +122,7 @@ fun HomeScreen(
             contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { Header(set.name, streak, Modifier.enter(0)) }
+            item { Header(set.name, streak, weather, Modifier.enter(0)) }
             item { StepsHero(today, Modifier.enter(1)) }
             item {
                 Row(Modifier.enter(2), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -123,7 +136,14 @@ fun HomeScreen(
                     WorkoutsCard(today)
                 }
             }
-            item { WeekGoalCard(weekKm, set.weeklyGoalKm, Modifier.enter(4)) }
+            item {
+                Row(Modifier.enter(4), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    WaterCard(waterMl, set.waterGoal, Modifier.weight(1.6f), onWater)
+                    KcalCard(today.kcal, Modifier.weight(1f))
+                }
+            }
+            if (tips.isNotEmpty()) item { TipsRow(tips, Modifier.enter(5)) }
+            item { WeekGoalCard(weekKm, set.weeklyGoalKm, Modifier.enter(6)) }
             if (showConnect) item {
                 Box(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, p.line, RoundedCornerShape(24.dp))
@@ -189,7 +209,7 @@ fun CtaPill(label: String, modifier: Modifier = Modifier, onClick: () -> Unit, p
 }
 
 @Composable
-private fun Header(name: String, streak: Int, modifier: Modifier) {
+private fun Header(name: String, streak: Int, weather: com.bachir.khutwa.shared.WeatherInfo?, modifier: Modifier) {
     val p = LocalPalette.current
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val greet = if (hour < 12) "صباح الخير" else "مساء الخير"
@@ -197,6 +217,7 @@ private fun Header(name: String, streak: Int, modifier: Modifier) {
         Column(Modifier.weight(1f)) {
             Text(SimpleDateFormat("EEEE d MMMM", Locale("ar")).format(Date()), style = txt(13, p.muted))
             Text("$greet، $name", style = txt(22, p.text, FontWeight.SemiBold))
+            weather?.let { Box(Modifier.padding(top = 6.dp)) { WeatherChip(it, onDark = p.dark) } }
         }
         if (streak > 0) Row(
             Modifier.clip(RoundedCornerShape(18.dp)).background(if (p.dark) Color(0xFF1C1D21) else Color.White).padding(horizontal = 12.dp, vertical = 7.dp),
@@ -360,10 +381,14 @@ fun WeekGoalCard(km: Double, goalKm: Int, modifier: Modifier = Modifier) {
     }
 }
 
-fun typeIcon(type: WorkoutType, runM: Double = 0.0): ImageVector = when {
-    type == WorkoutType.FOOTBALL -> Icons.Filled.SportsSoccer
-    type == WorkoutType.RUN || runM > 50 -> Icons.AutoMirrored.Filled.DirectionsRun
-    else -> Icons.AutoMirrored.Filled.DirectionsWalk
+fun typeIcon(type: WorkoutType, runM: Double = 0.0): ImageVector = when (type) {
+    WorkoutType.FOOTBALL -> Icons.Filled.SportsSoccer
+    WorkoutType.HIKE -> Icons.Filled.Terrain
+    WorkoutType.CYCLING -> Icons.AutoMirrored.Filled.DirectionsBike
+    WorkoutType.TREADMILL -> Icons.Filled.FitnessCenter
+    WorkoutType.INTERVALS -> Icons.Filled.Bolt
+    WorkoutType.RUN -> Icons.AutoMirrored.Filled.DirectionsRun
+    WorkoutType.WALK -> if (runM > 50) Icons.AutoMirrored.Filled.DirectionsRun else Icons.AutoMirrored.Filled.DirectionsWalk
 }
 
 @Composable
@@ -423,3 +448,89 @@ fun SegmentBar(segments: List<Segment>, height: Dp) {
     }
 }
 
+
+
+/** Water: tap to add a glass; the fill rises with a little wave. */
+@Composable
+fun WaterCard(ml: Int, goal: Int, modifier: Modifier, onAdd: (Int) -> Unit) {
+    val frac = (ml / goal.toFloat()).coerceIn(0f, 1f)
+    val f by animateFloatAsState(frac, tween(900, easing = FastOutSlowInEasing), label = "w")
+    val wave by androidx.compose.animation.core.rememberInfiniteTransition(label = "wave").animateFloat(
+        0f, (2 * Math.PI).toFloat(), androidx.compose.animation.core.infiniteRepeatable(tween(2600, easing = androidx.compose.animation.core.LinearEasing)), label = "ph",
+    )
+    Box(modifier.height(150.dp).clip(RoundedCornerShape(30.dp)).background(Color(0xFF0B2440))) {
+        Canvas(Modifier.matchParentSize()) {
+            val top = size.height * (1f - f)
+            val path = Path().apply {
+                moveTo(0f, size.height)
+                lineTo(0f, top)
+                var x = 0f
+                while (x <= size.width) {
+                    lineTo(x, top + 6.dp.toPx() * kotlin.math.sin(wave + x / size.width * 6.28f))
+                    x += 8f
+                }
+                lineTo(size.width, size.height); close()
+            }
+            drawPath(path, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF4FC3F7), Color(0xFF1E6FD9)), startY = top, endY = size.height))
+        }
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("الموية", style = txt(15, Color.White), modifier = Modifier.weight(1f))
+                Text("/ ${goal.grouped()} مل", style = txt(11, Color.White.copy(alpha = 0.85f)))
+            }
+            Row(verticalAlignment = Alignment.Bottom) {
+                CountText(ml.toLong(), numStyle(34.sp, Color.White))
+                Text(" مل", style = txt(12, Color.White.copy(alpha = 0.85f)), modifier = Modifier.padding(bottom = 6.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                WaterBtn("+٢٥٠", Modifier.weight(1f)) { onAdd(250) }
+                WaterBtn("+٥٠٠", Modifier.weight(1f)) { onAdd(500) }
+                WaterBtn("−", Modifier.width(40.dp)) { onAdd(-250) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WaterBtn(label: String, modifier: Modifier, onClick: () -> Unit) {
+    Box(modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.22f)).bounceClick(onClick = onClick), contentAlignment = Alignment.Center) {
+        Text(label, style = txt(13, Color.White, FontWeight.SemiBold))
+    }
+}
+
+@Composable
+private fun KcalCard(kcal: Int, modifier: Modifier) {
+    ToneCard(CardTone.WORKOUTS, modifier.height(150.dp), radius = 30.dp, pad = 16.dp) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+            Icon(Icons.Filled.LocalFireDepartment, null, tint = Color.White, modifier = Modifier.size(24.dp))
+            Column {
+                CountText(kcal.toLong(), numStyle(34.sp, Color.White), { "$it" })
+                Text("سعرة من التمارين", style = txt(11, Color.White.copy(alpha = 0.9f)), maxLines = 2)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TipsRow(tips: List<Tips.Tip>, modifier: Modifier) {
+    androidx.compose.foundation.lazy.LazyRow(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(tips.size) { i ->
+            val t = tips[i]
+            val tone = when (t.kind) {
+                Tips.Kind.WATER -> CardTone.WATER
+                Tips.Kind.SLEEP -> CardTone.SLEEP
+                Tips.Kind.HEAT -> CardTone.HIKE
+                Tips.Kind.RECOVERY -> CardTone.HEART
+                Tips.Kind.STREAK -> CardTone.WORKOUTS
+                Tips.Kind.PACE -> CardTone.INTERVALS
+                Tips.Kind.STEPS -> CardTone.GOAL
+            }
+            ToneCard(tone, Modifier.width(250.dp).height(118.dp), radius = 26.dp, pad = 16.dp) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(t.title, style = txt(15, Color.White, FontWeight.SemiBold), maxLines = 1)
+                    Text(t.body, style = txt(12, Color.White.copy(alpha = 0.92f)).copy(lineHeight = 18.sp), maxLines = 3)
+                }
+            }
+        }
+    }
+}

@@ -5,13 +5,66 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.util.Locale
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
 enum class Mode { WALK, RUN }
 
 /** What the user picked before starting. */
-enum class WorkoutType(val ar: String) { WALK("مشي"), RUN("جري"), FOOTBALL("كرة قدم") }
+enum class WorkoutType(val ar: String, val gps: Boolean = true, val walkRun: Boolean = true) {
+    WALK("مشي"),
+    RUN("جري"),
+    INTERVALS("جري مخصص"),
+    HIKE("هايكنج"),
+    TREADMILL("سير/جري داخلي", gps = false),
+    CYCLING("دراجة", walkRun = false),
+    FOOTBALL("كرة قدم", walkRun = false),
+}
+
+/** One block of a custom (interval) run. Ends by time or by distance. */
+@Serializable
+data class IntervalStep(val kind: Kind, val sec: Int = 0, val meters: Int = 0) {
+    enum class Kind(val ar: String) { WARMUP("إحماء"), RUN("جري"), WALK("مشي"), COOLDOWN("تهدئة") }
+    val label get() = if (meters > 0) "${kind.ar} ${if (meters >= 1000) "${meters / 1000.0} كم" else "$meters متر"}"
+    else "${kind.ar} ${if (sec % 60 == 0) "${sec / 60} د" else "${sec / 60}:${"%02d".format(sec % 60)}"}"
+}
+
+@Serializable
+data class IntervalPlan(
+    val id: String,
+    val name: String,
+    val warmupSec: Int = 300,
+    val runSec: Int = 120,
+    val runM: Int = 0,           // if > 0, run blocks end by distance instead of time
+    val walkSec: Int = 60,
+    val repeats: Int = 6,
+    val cooldownSec: Int = 300,
+) {
+    fun steps(): List<IntervalStep> = buildList {
+        if (warmupSec > 0) add(IntervalStep(IntervalStep.Kind.WARMUP, warmupSec))
+        repeat(repeats) { i ->
+            add(IntervalStep(IntervalStep.Kind.RUN, if (runM > 0) 0 else runSec, runM))
+            if (i < repeats - 1 && walkSec > 0) add(IntervalStep(IntervalStep.Kind.WALK, walkSec))
+        }
+        if (cooldownSec > 0) add(IntervalStep(IntervalStep.Kind.COOLDOWN, cooldownSec))
+    }
+    val totalSec get() = steps().sumOf { it.sec }
+}
+
+@Serializable
+data class Profile(
+    val weightKg: Double = 75.0,
+    val heightCm: Int = 175,
+    val age: Int = 30,
+    val male: Boolean = true,
+) {
+    /** Step length estimates (m) for indoor distance. */
+    val walkStride get() = heightCm * 0.415 / 100
+    val runStride get() = heightCm * 0.65 / 100
+    val bmi get() = weightKg / ((heightCm / 100.0) * (heightCm / 100.0))
+    val waterGoalMl get() = (weightKg * 35).toInt().let { (it / 250) * 250 }.coerceIn(1500, 4500)
+}
 
 /** Workout settings shared by phone and watch (the phone pushes its copy to the watch). */
 @Serializable
@@ -20,13 +73,37 @@ data class CoachConfig(
     val announceEveryM: Int = 1000,     // 500 or 1000
     val maxHr: Int = 190,
     val hrAlertZone: Int = 0,           // 0 = off, else alert when above this zone (1..4)
-    val goalM: Int = 0,                 // 0 = no goal for the session
+    val goalM: Int = 0,                 // 0 = no distance goal
+    val goalSec: Int = 0,               // 0 = no time goal
     val runSpeedKmh: Double = 7.4,
     val autoPause: Boolean = false,
+    val profile: Profile = Profile(),
+    val plan: IntervalPlan? = null,     // active custom run (for INTERVALS)
 ) {
     companion object {
         fun encode(c: CoachConfig) = WorkoutJson.json.encodeToString(serializer(), c)
         fun decode(s: String) = WorkoutJson.json.decodeFromString(serializer(), s)
+    }
+}
+
+@Serializable
+data class WeatherInfo(
+    val tempC: Double,
+    val feelsC: Double,
+    val humidity: Int,
+    val windKmh: Double,
+    val code: Int,
+) {
+    val ar get() = when (code) {
+        0 -> "صافي"
+        1, 2 -> "غائم جزئياً"
+        3 -> "غائم"
+        45, 48 -> "ضباب"
+        in 51..67 -> "مطر"
+        in 71..77 -> "ثلج"
+        in 80..82 -> "زخات مطر"
+        in 95..99 -> "عواصف"
+        else -> "—"
     }
 }
 
@@ -57,6 +134,9 @@ data class TodaySummary(
     val exerciseGoalMin: Int = 60,
     val workoutsWeek: Int = 0,
     val workoutsMonth: Int = 0,
+    val kcal: Int = 0,
+    val waterMl: Int = 0,
+    val waterGoalMl: Int = 2500,
     val updatedMs: Long = 0,
 ) {
     companion object {
@@ -97,21 +177,40 @@ data class Workout(
     val sprints: Int = 0,
     val maxSpeedMps: Double = 0.0,
     val pausedMs: Long = 0,
+    val steps: Int = 0,
+    val kcal: Int = 0,
+    val ascentM: Double = 0.0,
+    val descentM: Double = 0.0,
+    val weather: WeatherInfo? = null,
+    val planName: String? = null,
 ) {
     /** Time actually moving (pauses removed). */
     val activeMs get() = (endMs - startMs - pausedMs).coerceAtLeast(0)
     val title get() = when {
-        type == WorkoutType.FOOTBALL -> "كرة قدم"
+        planName != null -> planName
+        !type.walkRun || type == WorkoutType.HIKE || type == WorkoutType.TREADMILL -> type.ar
         runM > 50 && walkM > 50 -> "مشي + جري"
         runM > 50 -> "جري"
         else -> "مشي"
     }
     val avgPaceSec get() = if (distanceM > 50) ((activeMs / 1000.0) / (distanceM / 1000.0)).toInt() else null
+    val avgCadence get() = if (activeMs > 60_000 && steps > 0) (steps * 60_000L / activeMs).toInt() else null
     val durationMs get() = endMs - startMs
     val runM get() = segments.filter { it.mode == Mode.RUN }.sumOf { it.distanceM }
     val walkM get() = segments.filter { it.mode == Mode.WALK }.sumOf { it.distanceM }
     val runMs get() = segments.filter { it.mode == Mode.RUN }.sumOf { it.endMs - it.startMs }
 }
+
+/** Where the custom run currently is. */
+data class IntervalState(
+    val index: Int,
+    val total: Int,
+    val step: IntervalStep,
+    val next: IntervalStep?,
+    val remainingSec: Int?,     // for time steps
+    val remainingM: Int?,       // for distance steps
+    val fraction: Float,
+)
 
 data class LiveStats(
     val mode: Mode,
@@ -130,6 +229,16 @@ data class LiveStats(
     val paused: Boolean = false,
     val zone: Int = 0,
     val goalM: Int = 0,
+    val goalSec: Int = 0,
+    val steps: Int = 0,
+    val cadence: Int? = null,
+    val kcal: Int = 0,
+    val ascentM: Double = 0.0,
+    val descentM: Double = 0.0,
+    val altitudeM: Double? = null,
+    val speedKmh: Double = 0.0,
+    val interval: IntervalState? = null,
+    val weather: WeatherInfo? = null,
 )
 
 /** Live state shared between the service and the UI of the same app. */
@@ -139,7 +248,7 @@ object LiveSession {
 }
 
 object WorkoutJson {
-    val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; coerceInputValues = true }
 
     fun encode(w: Workout): String = json.encodeToString(Workout.serializer(), w)
     fun decode(s: String): Workout = json.decodeFromString(Workout.serializer(), s)
@@ -154,13 +263,13 @@ object WorkoutJson {
 
 object Fmt {
     fun pace(sec: Int?): String = if (sec == null || sec <= 0 || sec > 3600) "--:--"
-    else "%d:%02d".format(sec / 60, sec % 60)
+    else String.format(Locale.US, "%d:%02d", sec / 60, sec % 60)
 
-    fun dist(m: Double): String = "%.2f".format(m / 1000.0)
+    fun dist(m: Double): String = String.format(Locale.US, "%.2f", m / 1000.0)
 
     fun duration(ms: Long): String {
-        val s = ms / 1000
-        return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60)
-        else "%02d:%02d".format(s / 60, s % 60)
+        val s = (ms / 1000).coerceAtLeast(0)
+        return if (s >= 3600) String.format(Locale.US, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+        else String.format(Locale.US, "%02d:%02d", s / 60, s % 60)
     }
 }

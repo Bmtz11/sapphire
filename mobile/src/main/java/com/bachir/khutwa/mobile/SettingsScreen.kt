@@ -81,7 +81,32 @@ fun SettingsScreen(onBack: () -> Unit, onConnectHealth: () -> Unit) {
         }
 
         item {
+            Section("بياناتك", Modifier.enter(1)) {
+                val pr = s.profile
+                Item("الوزن (كجم)") { Stepper(String.format(Locale.US, "%.1f", pr.weightKg), { up { it.copy(profile = it.profile.copy(weightKg = (it.profile.weightKg - 0.5).coerceAtLeast(30.0))) } }, { up { it.copy(profile = it.profile.copy(weightKg = it.profile.weightKg + 0.5)) } }) }
+                Divider()
+                Item("الطول (سم)") { Stepper("${pr.heightCm}", { up { it.copy(profile = it.profile.copy(heightCm = (it.profile.heightCm - 1).coerceAtLeast(120))) } }, { up { it.copy(profile = it.profile.copy(heightCm = (it.profile.heightCm + 1).coerceAtMost(230))) } }) }
+                Divider()
+                Item("العمر") { Stepper("${pr.age}", { up { it.copy(profile = it.profile.copy(age = (it.profile.age - 1).coerceAtLeast(10)), maxHr = 220 - (it.profile.age - 1).coerceAtLeast(10)) } }, { up { it.copy(profile = it.profile.copy(age = (it.profile.age + 1).coerceAtMost(99)), maxHr = 220 - (it.profile.age + 1).coerceAtMost(99)) } }) }
+                Divider()
+                Item("الجنس") { Segmented(listOf("ذكر", "أنثى"), if (pr.male) 0 else 1) { v -> up { it.copy(profile = it.profile.copy(male = v == 0)) } } }
+                Divider()
+                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                    Text("مؤشر كتلة الجسم", style = txt(15, p.text), modifier = Modifier.weight(1f))
+                    val bmi = pr.bmi
+                    Text(String.format(Locale.US, "%.1f", bmi), style = numStyle(18.sp, p.text, FontWeight.Bold))
+                    Text(" • " + when { bmi < 18.5 -> "نحيف"; bmi < 25 -> "طبيعي"; bmi < 30 -> "زيادة"; else -> "سمنة" }, style = txt(13, p.muted))
+                }
+                Text("الوزن والطول للسعرات وطول الخطوة في التمارين الداخلية.", style = txt(11, p.muted))
+            }
+        }
+
+        item {
             Section("الأهداف", Modifier.enter(1)) {
+                Item("الموية اليومية (مل)", if (s.waterGoalMl == 0) "تلقائي من وزنك" else null) {
+                    Stepper(s.waterGoal.grouped(), { up { it.copy(waterGoalMl = (it.waterGoal - 250).coerceAtLeast(1000)) } }, { up { it.copy(waterGoalMl = it.waterGoal + 250) } })
+                }
+                Divider()
                 Item("هدف الخطوات اليومي") { Stepper(s.stepGoal.grouped(), { up { it.copy(stepGoal = (it.stepGoal - 500).coerceAtLeast(1000)) } }, { up { it.copy(stepGoal = it.stepGoal + 500) } }) }
                 Divider()
                 Item("دقائق التمرين اليومية") { Stepper("${s.exerciseGoalMin}", { up { it.copy(exerciseGoalMin = (it.exerciseGoalMin - 5).coerceAtLeast(10)) } }, { up { it.copy(exerciseGoalMin = it.exerciseGoalMin + 5) } }) }
@@ -132,6 +157,8 @@ fun SettingsScreen(onBack: () -> Unit, onConnectHealth: () -> Unit) {
                 Divider()
                 Item("إيقاف تلقائي إذا وقفت", "للمشي والجري") { Toggle(s.autoPause) { v -> up { it.copy(autoPause = v) } } }
                 Divider()
+                Item("الطقس أثناء التمرين") { Toggle(s.weatherOn) { v -> up { it.copy(weatherOn = v) } } }
+                Divider()
                 Item("الشاشة تبقى شغالة") { Toggle(s.keepScreenOn) { v -> up { it.copy(keepScreenOn = v) } } }
                 Divider()
                 Item("سرعة اكتشاف الجري", "فوقها يعتبرك تجري") {
@@ -152,7 +179,7 @@ fun SettingsScreen(onBack: () -> Unit, onConnectHealth: () -> Unit) {
                 }
             }
         }
-        item { Text("سافاير • ١.١", style = txt(12, p.muted), modifier = Modifier.fillMaxWidth().padding(8.dp)) }
+        item { Text("سافاير • ١.٣", style = txt(12, p.muted), modifier = Modifier.fillMaxWidth().padding(8.dp)) }
     }
 }
 

@@ -143,6 +143,12 @@ object TodayReader {
             }
         }
 
+        Water.refresh(ctx)
+        s = s.copy(
+            kcal = local.filter { it.startMs >= dayStart.toEpochMilli() }.sumOf { it.kcal },
+            waterMl = Water.todayMl.value,
+            waterGoalMl = set.waterGoal,
+        )
         activeDays.value = days
         today.value = s
         runCatching { pushToWatch(ctx, s, set) }

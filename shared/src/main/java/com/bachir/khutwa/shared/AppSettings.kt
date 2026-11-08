@@ -20,13 +20,28 @@ data class AppSettings(
     val countdown: Boolean = true,
     val keepScreenOn: Boolean = true,
     val syncHealth: Boolean = true,
+    val profile: Profile = Profile(),
+    val waterGoalMl: Int = 0,           // 0 = auto from weight
+    val plans: List<IntervalPlan> = DEFAULT_PLANS,
+    val activePlanId: String = DEFAULT_PLANS.first().id,
+    val weatherOn: Boolean = true,
+    val routeColorBySpeed: Boolean = true,
 ) {
-    fun coach(goalM: Int) = CoachConfig(
+    val activePlan get() = plans.firstOrNull { it.id == activePlanId } ?: plans.firstOrNull()
+    val waterGoal get() = if (waterGoalMl > 0) waterGoalMl else profile.waterGoalMl
+
+    fun coach(goalM: Int, goalSec: Int = 0) = CoachConfig(
         coachOn = coachOn, announceEveryM = announceEveryM, maxHr = maxHr,
-        hrAlertZone = hrAlertZone, goalM = goalM, runSpeedKmh = runSpeedKmh, autoPause = autoPause,
+        hrAlertZone = hrAlertZone, goalM = goalM, goalSec = goalSec, runSpeedKmh = runSpeedKmh, autoPause = autoPause,
+        profile = profile, plan = activePlan,
     )
 
     companion object {
+        val DEFAULT_PLANS = listOf(
+            IntervalPlan("p1", "بداية الجري: ٢ جري / ١ مشي", warmupSec = 300, runSec = 120, walkSec = 60, repeats = 8, cooldownSec = 300),
+            IntervalPlan("p2", "٥ جري / ١ مشي", warmupSec = 300, runSec = 300, walkSec = 60, repeats = 5, cooldownSec = 300),
+            IntervalPlan("p3", "سرعات ٤٠٠ متر", warmupSec = 600, runM = 400, walkSec = 90, repeats = 6, cooldownSec = 300),
+        )
         fun encode(s: AppSettings) = WorkoutJson.json.encodeToString(serializer(), s)
         fun decode(s: String) = runCatching { WorkoutJson.json.decodeFromString(serializer(), s) }.getOrDefault(AppSettings())
     }

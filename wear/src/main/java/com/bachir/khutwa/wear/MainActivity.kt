@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
@@ -113,6 +114,9 @@ enum class Tone(val base: Brush, val blobs: List<Blob>) {
     WALK(Brush.linearGradient(listOf(Color(0xFF2A6FD6), Color(0xFF2A6FD6))), listOf(Blob(Color(0xFF071433), 0.2f, 0.2f, 0.85f), Blob(Color(0xCC8CBEFF), 1.0f, 1.2f, 0.8f))),
     RUN(Brush.linearGradient(listOf(Color(0xFFC4532E), Color(0xFFC4532E))), listOf(Blob(Color(0xE63C50F0), 0.2f, 0.25f, 0.6f))),
     FOOTBALL(Brush.linearGradient(listOf(Color(0xFF2E4A3A), Color(0xFF2E4A3A))), listOf(Blob(Color(0x8CA0D278), 0.9f, 0.0f, 1.2f), Blob(Color(0xFF050805), 0.1f, 1.0f, 0.8f))),
+    INTERVALS(Brush.linearGradient(listOf(Color(0xFF6A2C8C), Color(0xFF6A2C8C))), listOf(Blob(Color(0xCCFF5AA5), 0.9f, 0.1f, 1.0f))),
+    HIKE(Brush.linearGradient(listOf(Color(0xFF5A4A2E), Color(0xFF5A4A2E))), listOf(Blob(Color(0x99E0B060), 0.85f, 0.05f, 1.1f))),
+    CYCLING(Brush.linearGradient(listOf(Color(0xFF0F5A5E), Color(0xFF0F5A5E))), listOf(Blob(Color(0x9946E0D0), 0.85f, 0.05f, 1.1f))),
 }
 
 @Composable
@@ -209,25 +213,24 @@ private fun HomeScreen(today: TodaySummary?, onStart: (WorkoutType) -> Unit) {
         item { StepsCard(today) }
         item { HeartCard(today) }
         item { Text("ابدأ تمرين", style = txt(12, Muted), modifier = Modifier.padding(top = 4.dp)) }
-        item {
-            ToneBox(Tone.WALK, Modifier.fillMaxWidth(0.82f).height(66.dp).clickable { onStart(WorkoutType.WALK) }, 22.dp, 12.dp) {
-                Column(Modifier.align(Alignment.CenterStart)) {
-                    Text("مشي", style = txt(14, weight = FontWeight.SemiBold))
-                    Text("يكتشف الجري تلقائياً", style = txt(9, Color.White.copy(alpha = 0.92f)))
-                }
-                Box(Modifier.align(Alignment.CenterEnd).size(26.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-                    PlayTriangle()
-                }
+        items(WorkoutType.entries.size) { i ->
+            val t = WorkoutType.entries[i]
+            val tone = when (t) {
+                WorkoutType.WALK -> Tone.WALK
+                WorkoutType.RUN -> Tone.RUN
+                WorkoutType.FOOTBALL -> Tone.FOOTBALL
+                WorkoutType.INTERVALS -> Tone.INTERVALS
+                WorkoutType.HIKE -> Tone.HIKE
+                WorkoutType.TREADMILL -> Tone.SLEEP
+                WorkoutType.CYCLING -> Tone.CYCLING
             }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(0.82f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ToneBox(Tone.RUN, Modifier.weight(1f).height(52.dp).clickable { onStart(WorkoutType.RUN) }, 20.dp, 10.dp) {
-                    Text("جري", style = txt(12, weight = FontWeight.SemiBold), modifier = Modifier.align(Alignment.BottomStart))
+            ToneBox(tone, Modifier.fillMaxWidth(0.84f).height(if (i == 0) 64.dp else 52.dp).clickable { onStart(t) }, 22.dp, 11.dp) {
+                Column(Modifier.align(Alignment.CenterStart)) {
+                    Text(t.ar, style = txt(13, weight = FontWeight.SemiBold))
+                    if (t == WorkoutType.INTERVALS) WatchToday.coach.value.plan?.let { Text(it.name, style = txt(9, Color.White.copy(alpha = 0.9f)), maxLines = 1) }
+                    else if (i == 0) Text("يكتشف الجري تلقائياً", style = txt(9, Color.White.copy(alpha = 0.92f)))
                 }
-                ToneBox(Tone.FOOTBALL, Modifier.weight(1f).height(52.dp).clickable { onStart(WorkoutType.FOOTBALL) }, 20.dp, 10.dp) {
-                    Text("كرة قدم", style = txt(12, weight = FontWeight.SemiBold), modifier = Modifier.align(Alignment.BottomStart))
-                }
+                Box(Modifier.align(Alignment.CenterEnd).size(24.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) { PlayTriangle() }
             }
         }
     }
@@ -290,7 +293,13 @@ private fun LiveScreen(s: LiveStats, onTapPace: () -> Unit, onEnd: () -> Unit) {
     val football = s.type == WorkoutType.FOOTBALL
     val color = when { s.paused -> Color(0xFF6B6F76); football -> Color(0xFF3DD68C); s.mode == Mode.RUN -> RunOrange; else -> WalkBlue }
     val glow = when { football -> Color(0xFF2E7A50); s.mode == Mode.RUN -> RunOrange; else -> Color(0xFF2A6FD6) }
-    val label = if (s.paused) "متوقف" else if (football) "كرة قدم" else if (s.mode == Mode.RUN) "جري" else "مشي"
+    val label = when {
+        s.paused -> "متوقف"
+        s.interval != null -> "${s.interval!!.step.kind.ar} ${s.interval!!.index + 1}/${s.interval!!.total}"
+        !s.type.walkRun || s.type == WorkoutType.HIKE -> s.type.ar
+        s.mode == Mode.RUN -> "جري"
+        else -> "مشي"
+    }
     // progress ring: fraction of the current kilometer
     val kmFrac = ((s.distanceM % 1000) / 1000).toFloat()
 
@@ -308,8 +317,23 @@ private fun LiveScreen(s: LiveStats, onTapPace: () -> Unit, onEnd: () -> Unit) {
                 }
                 Text(Fmt.duration(s.elapsedMs), style = txt(11, weight = FontWeight.SemiBold))
             }
-            Text(Fmt.pace(s.paceSec), style = doto(46.sp), modifier = Modifier.clickable(onClick = onTapPace))
-            Text("الوتيرة /كم", style = txt(9, Color.White.copy(alpha = 0.9f)))
+            val iv = s.interval
+            val left = if (s.goalSec > 0) (s.goalSec - s.elapsedMs / 1000).coerceAtLeast(0) else null
+            val big = when {
+                iv != null -> iv.remainingSec?.let { Fmt.duration(it * 1000L) } ?: "${iv.remainingM}م"
+                left != null -> Fmt.duration(left * 1000)
+                s.type == WorkoutType.CYCLING -> String.format(java.util.Locale.US, "%.1f", s.speedKmh)
+                else -> Fmt.pace(s.paceSec)
+            }
+            val sub = when {
+                iv != null -> iv.step.label + (iv.next?.let { " ← ${it.kind.ar}" } ?: "")
+                left != null -> "متبقي • ${Fmt.pace(s.paceSec)}"
+                s.type == WorkoutType.CYCLING -> "كم/س"
+                else -> "الوتيرة /كم"
+            }
+            Text(big, style = doto(44.sp), modifier = Modifier.clickable(onClick = onTapPace))
+            Text(sub, style = txt(9, Color.White.copy(alpha = 0.9f)), maxLines = 1)
+            if (s.steps > 0 || s.kcal > 0) Text("${s.steps} خطوة • ${s.kcal} سعرة" + if (s.ascentM > 3) " • ↑${s.ascentM.roundToInt()}م" else "", style = txt(9, Muted))
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 ToneBox(Tone.HEART, Modifier.width(70.dp).height(38.dp), 14.dp, 7.dp) {
