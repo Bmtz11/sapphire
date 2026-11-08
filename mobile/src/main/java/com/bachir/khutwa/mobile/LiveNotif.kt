@@ -85,7 +85,8 @@ object LiveNotif {
                 .setShowWhen(true)
                 .setUsesChronometer(s?.paused != true)
                 .setShortCriticalText(dist)
-                .setRequestPromotedOngoing(true)
+                // Live Update / Now Bar request (Notification.EXTRA_REQUEST_PROMOTED_ONGOING)
+                .addExtras(android.os.Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
                 .apply { if (!remote) addAction(Notification.Action.Builder(null, pauseLabel, action(ctx, pauseAction, 1)).build()) }
             val style = Notification.ProgressStyle()
                 .setStyledByProgress(true)
