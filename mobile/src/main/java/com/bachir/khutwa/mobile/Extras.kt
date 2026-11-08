@@ -158,9 +158,9 @@ object Tips {
         val left = t.stepGoal - t.steps
         if (hour >= 17 && left in 1..4000) out += Tip("قريب من هدف الخطوات", "باقي ${left} خطوة — مشية ${(left / 110).coerceAtLeast(5)} دقيقة تكفي.", Kind.STEPS)
         val last = workouts.firstOrNull()
-        if (last != null && last.avgHr != null && last.maxHr != null && last.maxHr >= 175 &&
-            System.currentTimeMillis() - last.endMs < 20 * 3600_000L)
-            out += Tip("يوم استشفاء", "آخر تمرين كان قوي (نبض ${last.maxHr}). اليوم مشي أو تمدد أفضل.", Kind.RECOVERY)
+        val lastMax = last?.maxHr
+        if (last != null && lastMax != null && lastMax >= 175 && System.currentTimeMillis() - last.endMs < 20 * 3600_000L)
+            out += Tip("يوم استشفاء", "آخر تمرين كان قوي (نبض $lastMax). اليوم مشي أو تمدد أفضل.", Kind.RECOVERY)
         if (streak >= 2) out += Tip("$streak أيام ورا بعض", "لا تكسر السلسلة — حتى ١٥ دقيقة مشي تحسب.", Kind.STREAK)
         val runs = workouts.filter { it.runM > 1000 }.take(5)
         if (runs.size >= 3) {
