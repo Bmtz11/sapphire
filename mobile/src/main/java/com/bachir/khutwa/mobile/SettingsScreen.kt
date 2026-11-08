@@ -175,11 +175,6 @@ fun SettingsScreen(onBack: () -> Unit, onConnectHealth: () -> Unit) {
                 Divider()
                 Item(tr("الخريطة ثلاثية الأبعاد"), tr("مباني ومنظور مائل")) { Toggle(s.map3d) { v -> up { it.copy(map3d = v) } } }
                 Divider()
-                Item(tr("التحكم بالموسيقى"), if (Music.hasAccess(ctx)) tr("مفعّل") else "Spotify • YouTube Music • Samsung") {
-                    Text(if (Music.hasAccess(ctx)) "✓" else tr("تفعيل"), style = txt(14, WalkBlue, FontWeight.Medium),
-                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).bounceClick { Music.askAccess(ctx) }.padding(8.dp))
-                }
-                Divider()
                 Item(tr("الطقس أثناء التمرين")) { Toggle(s.weatherOn) { v -> up { it.copy(weatherOn = v) } } }
                 Divider()
                 Item(tr("الشاشة تبقى شغالة")) { Toggle(s.keepScreenOn) { v -> up { it.copy(keepScreenOn = v) } } }

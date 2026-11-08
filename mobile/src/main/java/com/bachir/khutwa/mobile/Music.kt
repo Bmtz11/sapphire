@@ -49,8 +49,6 @@ import androidx.compose.ui.unit.dp
 import com.bachir.khutwa.shared.tr
 import kotlinx.coroutines.delay
 
-/** Needed so the app may read what's playing (Spotify, YouTube Music, Samsung Music…). */
-class MediaListener : NotificationListenerService()
 
 data class NowPlaying(val title: String, val artist: String, val app: String, val playing: Boolean, val art: Bitmap?)
 
@@ -61,15 +59,12 @@ object Music {
         "com.sec.android.app.music" to "Samsung Music",
     )
 
-    fun hasAccess(ctx: Context) = runCatching {
-        AndroidSettings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners")?.contains(ctx.packageName) == true
-    }.getOrDefault(false)
+    // No notification-listener access: Play Protect blocks sideloaded apps that request it.
+    // Controls go through system media keys, which every player obeys.
+    fun hasAccess(ctx: Context) = false
 
     private fun controller(ctx: Context): MediaController? = runCatching {
-        if (!hasAccess(ctx)) return null
-        val msm = ctx.getSystemService(MediaSessionManager::class.java)
-        val list = msm.getActiveSessions(ComponentName(ctx, MediaListener::class.java))
-        list.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: list.firstOrNull()
+        null
     }.getOrNull()
 
     fun now(ctx: Context): NowPlaying? {
@@ -132,7 +127,7 @@ fun MusicCard(modifier: Modifier = Modifier, dark: Boolean = true) {
             }
             Column(Modifier.weight(1f)) {
                 Text(np?.title?.takeIf { it.isNotBlank() } ?: tr("الموسيقى"), style = txt(14, fg, FontWeight.SemiBold), maxLines = 1)
-                Text(np?.let { "${it.artist} • ${it.app}" } ?: if (access) tr("شغّل أغنية من تطبيقك") else tr("التحكم شغال • اسمح بعرض اسم الأغنية"), style = txt(11, sub), maxLines = 1)
+                Text(np?.let { "${it.artist} • ${it.app}" } ?: tr("شغّل أغنية من تطبيقك"), style = txt(11, sub), maxLines = 1)
             }
             CtrlBtn(Icons.Filled.SkipPrevious, fg) { Music.key(ctx, "prev") }
             Box(Modifier.size(42.dp).clip(CircleShape).background(fg).bounceClick { Music.key(ctx, "play") }, contentAlignment = Alignment.Center) {
@@ -145,9 +140,6 @@ fun MusicCard(modifier: Modifier = Modifier, dark: Boolean = true) {
                 Box(Modifier.clip(RoundedCornerShape(14.dp)).background(fg.copy(alpha = 0.1f)).bounceClick { Music.open(ctx, pkg) }.padding(horizontal = 12.dp, vertical = 7.dp)) {
                     Text(name, style = txt(12, fg, FontWeight.Medium))
                 }
-            }
-            if (!access) Box(Modifier.clip(RoundedCornerShape(14.dp)).background(WalkBlue.copy(alpha = 0.25f)).bounceClick { Music.askAccess(ctx) }.padding(horizontal = 12.dp, vertical = 7.dp)) {
-                Text(tr("السماح"), style = txt(12, fg, FontWeight.Medium))
             }
         }
     }
