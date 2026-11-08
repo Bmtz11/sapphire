@@ -14,8 +14,6 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "1.2"
-        // Google Maps key: GitHub secret MAPS_API_KEY in CI, or MAPS_API_KEY in ~/.gradle/gradle.properties locally
-        manifestPlaceholders["MAPS_API_KEY"] = System.getenv("MAPS_API_KEY") ?: (project.findProperty("MAPS_API_KEY") as String? ?: "")
     }
     signingConfigs {
         create("sapphire") {
@@ -55,6 +53,5 @@ dependencies {
     implementation("com.google.android.gms:play-services-wearable:19.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     implementation("androidx.health.connect:connect-client:1.1.0")
-    implementation("com.google.maps.android:maps-compose:6.2.1")
-    implementation("com.google.android.gms:play-services-maps:19.0.0")
+    implementation("org.maplibre.gl:android-sdk:11.8.1")
 }
