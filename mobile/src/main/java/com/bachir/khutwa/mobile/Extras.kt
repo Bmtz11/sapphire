@@ -1,5 +1,7 @@
 package com.bachir.khutwa.mobile
 
+import com.bachir.khutwa.shared.tr
+
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -81,14 +83,14 @@ object PhoneSteps : SensorEventListener {
     override fun onSensorChanged(e: SensorEvent) {
         val total = e.values[0].toLong()
         val day = LocalDate.now().toString()
-        var base = prefs.getLong("base_$day", -1)
+        var base = prefs.getLong("base_${day}", -1)
         val last = prefs.getLong("last", -1)
         if (base < 0) {
             // first reading today: start from the last known reading (counts steps since midnight if the app ran then)
             base = if (last in 0..total && prefs.getString("lastDay", "") == LocalDate.now().minusDays(1).toString()) last else total
-            prefs.edit().putLong("base_$day", base).apply()
+            prefs.edit().putLong("base_${day}", base).apply()
         }
-        if (total < base) { base = 0; prefs.edit().putLong("base_$day", 0).apply() } // phone rebooted
+        if (total < base) { base = 0; prefs.edit().putLong("base_${day}", 0).apply() } // phone rebooted
         prefs.edit().putLong("last", total).putString("lastDay", day).apply()
         today.value = total - base
     }
@@ -147,27 +149,27 @@ object Tips {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val out = mutableListOf<Tip>()
         weather?.let {
-            if (it.feelsC >= 35) out += Tip("الجو حار ${it.feelsC.toInt()}°", "تمرّن الصبح بدري أو بعد المغرب، وخذ موية معك.", Kind.HEAT)
-            else if (it.feelsC in 15.0..26.0) out += Tip("الجو مناسب للجري", "${it.tempC.toInt()}° و${it.ar}. فرصة لتمرين برا.", Kind.HEAT)
+            if (it.feelsC >= 35) out += Tip(tr("الجو حار {0}°", it.feelsC.toInt()), tr("تمرّن الصبح بدري أو بعد المغرب، وخذ موية معك."), Kind.HEAT)
+            else if (it.feelsC in 15.0..26.0) out += Tip(tr("الجو مناسب للجري"), tr("{0}° و{1}. فرصة لتمرين برا.", it.tempC.toInt(), it.ar), Kind.HEAT)
         }
         t.sleepMin?.let {
-            if (it < 360) out += Tip("نومك قليل أمس", "نمت ${it / 60} ساعات و${it % 60} دقيقة. خلي تمرين اليوم خفيف، مشي أو جري هادي.", Kind.SLEEP)
+            if (it < 360) out += Tip(tr("نومك قليل أمس"), tr("نمت {0} ساعات و{1} دقيقة. خلي تمرين اليوم خفيف، مشي أو جري هادي.", it / 60, it % 60), Kind.SLEEP)
         }
         if (water < waterGoal * (hour - 7).coerceIn(0, 14) / 14 - 250 && hour in 10..22)
-            out += Tip("اشرب موية", "شربت ${water} مل من ${waterGoal}. كاس الحين يرفع طاقتك.", Kind.WATER)
+            out += Tip(tr("اشرب موية"), tr("شربت {0} مل من {1}. كاس الحين يرفع طاقتك.", water, waterGoal), Kind.WATER)
         val left = t.stepGoal - t.steps
-        if (hour >= 17 && left in 1..4000) out += Tip("قريب من هدف الخطوات", "باقي ${left} خطوة — مشية ${(left / 110).coerceAtLeast(5)} دقيقة تكفي.", Kind.STEPS)
+        if (hour >= 17 && left in 1..4000) out += Tip(tr("قريب من هدف الخطوات"), tr("باقي {0} خطوة — مشية {1} دقيقة تكفي.", left, (left / 110).coerceAtLeast(5)), Kind.STEPS)
         val last = workouts.firstOrNull()
         val lastMax = last?.maxHr
         if (last != null && lastMax != null && lastMax >= 175 && System.currentTimeMillis() - last.endMs < 20 * 3600_000L)
-            out += Tip("يوم استشفاء", "آخر تمرين كان قوي (نبض $lastMax). اليوم مشي أو تمدد أفضل.", Kind.RECOVERY)
-        if (streak >= 2) out += Tip("$streak أيام ورا بعض", "لا تكسر السلسلة — حتى ١٥ دقيقة مشي تحسب.", Kind.STREAK)
+            out += Tip(tr("يوم استشفاء"), tr("آخر تمرين كان قوي (نبض {0}). اليوم مشي أو تمدد أفضل.", lastMax), Kind.RECOVERY)
+        if (streak >= 2) out += Tip(tr("{0} أيام ورا بعض", streak), tr("لا تكسر السلسلة — حتى ١٥ دقيقة مشي تحسب."), Kind.STREAK)
         val runs = workouts.filter { it.runM > 1000 }.take(5)
         if (runs.size >= 3) {
             val avg = runs.mapNotNull { it.avgPaceSec }.average()
-            if (!avg.isNaN()) out += Tip("وتيرتك المعتادة", "معدلك في آخر ${runs.size} جريات ${com.bachir.khutwa.shared.Fmt.pace(avg.toInt())} /كم. جرّب جري مخصص للسرعات.", Kind.PACE)
+            if (!avg.isNaN()) out += Tip(tr("وتيرتك المعتادة"), tr("معدلك في آخر {0} جريات {1} /كم. جرّب جري مخصص للسرعات.", runs.size, com.bachir.khutwa.shared.Fmt.pace(avg.toInt())), Kind.PACE)
         }
-        if (out.isEmpty()) out += Tip("ابدأ بخطوة", "مشية ٢٠ دقيقة اليوم ترفع نشاطك وتحسن نومك.", Kind.STEPS)
+        if (out.isEmpty()) out += Tip(tr("ابدأ بخطوة"), tr("مشية ٢٠ دقيقة اليوم ترفع نشاطك وتحسن نومك."), Kind.STEPS)
         return out
     }
 }

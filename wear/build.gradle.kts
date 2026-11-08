@@ -13,8 +13,8 @@ android {
         applicationId = "com.bachir.sapphire"
         minSdk = 30
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
     signingConfigs {
         create("sapphire") {
@@ -48,6 +48,8 @@ dependencies {
     implementation("androidx.wear.compose:compose-material:1.4.0")
     implementation("androidx.wear.compose:compose-foundation:1.4.0")
     implementation("androidx.lifecycle:lifecycle-service:2.8.7")
+    implementation("androidx.wear:wear-ongoing:1.0.0")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
     implementation("androidx.health:health-services-client:1.1.0-alpha05")

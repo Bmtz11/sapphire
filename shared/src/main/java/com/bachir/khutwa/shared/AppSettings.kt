@@ -9,7 +9,7 @@ data class AppSettings(
     val theme: Int = 0,                 // 0 auto, 1 light, 2 dark
     val coachOn: Boolean = true,
     val announceEveryM: Int = 1000,
-    val voiceRate: Float = 1.0f,
+    val voiceRate: Float = 0.95f,
     val maxHr: Int = 190,
     val hrAlertZone: Int = 4,           // 0 off; alert when above zone N
     val stepGoal: Int = 10_000,
@@ -26,6 +26,10 @@ data class AppSettings(
     val activePlanId: String = DEFAULT_PLANS.first().id,
     val weatherOn: Boolean = true,
     val routeColorBySpeed: Boolean = true,
+    val english: Boolean = false,
+    val voiceName: String? = null,
+    val voicePitch: Float = 0.95f,
+    val map3d: Boolean = true,
 ) {
     val activePlan get() = plans.firstOrNull { it.id == activePlanId } ?: plans.firstOrNull()
     val waterGoal get() = if (waterGoalMl > 0) waterGoalMl else profile.waterGoalMl
@@ -33,7 +37,7 @@ data class AppSettings(
     fun coach(goalM: Int, goalSec: Int = 0) = CoachConfig(
         coachOn = coachOn, announceEveryM = announceEveryM, maxHr = maxHr,
         hrAlertZone = hrAlertZone, goalM = goalM, goalSec = goalSec, runSpeedKmh = runSpeedKmh, autoPause = autoPause,
-        profile = profile, plan = activePlan,
+        profile = profile, plan = activePlan, english = english, voiceName = voiceName,
     )
 
     companion object {

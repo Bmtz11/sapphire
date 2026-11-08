@@ -60,15 +60,22 @@ class MainActivity : ComponentActivity() {
                 WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !dark
             }
             CompositionLocalProvider(
-                LocalLayoutDirection provides LayoutDirection.Rtl,
+                LocalLayoutDirection provides if (set.english) LayoutDirection.Ltr else LayoutDirection.Rtl,
                 LocalPalette provides palette,
             ) {
                 MaterialTheme(
                     colorScheme = if (dark) darkColorScheme(primary = WalkBlue, background = palette.bg, surface = palette.card)
                     else lightColorScheme(primary = palette.text, background = palette.bg, surface = palette.card),
-                ) { App(::keepScreen) }
+                ) { androidx.compose.runtime.key(set.english) { App(::keepScreen, ::lockScreen) } }
             }
         }
+    }
+
+    /** During a workout the live screen shows over the lock screen (Nike/Strava style). */
+    private fun lockScreen(on: Boolean) {
+        if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(on); setTurnScreenOn(false) }
+        else if (on) window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
     }
 
     private fun keepScreen(on: Boolean) {
@@ -77,7 +84,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { HOME, START, PLAN, COUNTDOWN, STATS, SETTINGS, DETAIL, LIVE }
+private enum class Screen { HOME, START, PLAN, COUNTDOWN, STATS, SETTINGS, BADGES, DETAIL, LIVE }
 
 private fun runtimePermissions() = buildList {
     add(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -86,7 +93,7 @@ private fun runtimePermissions() = buildList {
 }.toTypedArray()
 
 @Composable
-private fun App(keepScreen: (Boolean) -> Unit) {
+private fun App(keepScreen: (Boolean) -> Unit, lockScreen: (Boolean) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val live by LiveSession.stats.collectAsState()
@@ -105,6 +112,13 @@ private fun App(keepScreen: (Boolean) -> Unit) {
     val waterMl by Water.todayMl.collectAsState()
     val weather by WeatherClient.now.collectAsState()
     var hcGranted by remember { mutableStateOf(true) }
+    val remoteRaw by RemoteLive.state.collectAsState()
+    // tick so a silent watch (out of range) drops back to home after 15 s
+    var nowTick by remember { mutableStateOf(0L) }
+    LaunchedEffect(remoteRaw) { while (remoteRaw != null) { nowTick = System.currentTimeMillis(); kotlinx.coroutines.delay(5000) } }
+    val remote = remoteRaw?.takeIf { nowTick >= 0 && RemoteLive.fresh(it) }
+    val badges by Badges.earned.collectAsState()
+    val fresh by Badges.fresh.collectAsState()
 
     fun hasPerm(p: String) = androidx.core.content.ContextCompat.checkSelfPermission(ctx, p) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
@@ -138,12 +152,13 @@ private fun App(keepScreen: (Boolean) -> Unit) {
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh() }
-    LaunchedEffect(live != null, set.keepScreenOn) { keepScreen(live != null && set.keepScreenOn) }
+    val anyLive = live != null || remote != null
+    LaunchedEffect(anyLive, set.keepScreenOn) { keepScreen(anyLive && set.keepScreenOn); lockScreen(anyLive) }
     // after a workout ends, refresh the numbers
     LaunchedEffect(live == null) { if (live == null) refresh() }
 
     val current = when {
-        live != null -> Screen.LIVE
+        live != null || remote != null -> Screen.LIVE
         screen == Screen.DETAIL && openId?.let { WorkoutStore.get(it) } == null -> Screen.HOME
         else -> screen
     }
@@ -161,7 +176,11 @@ private fun App(keepScreen: (Boolean) -> Unit) {
             label = "nav",
         ) { sc ->
             when (sc) {
-                Screen.LIVE -> live?.let { LiveScreen(it) }
+                Screen.LIVE -> live?.let { LiveScreen(it) } ?: remote?.let { LiveScreen(it.toStats(), remote = true) }
+                Screen.BADGES -> {
+                    BackHandler { screen = Screen.HOME }
+                    BadgesScreen(badges) { screen = Screen.HOME }
+                }
                 Screen.COUNTDOWN -> CountdownScreen(pendingType) {
                     PhoneWorkoutService.start(ctx, pendingType, pendingGoal, pendingGoalSec)
                     screen = Screen.HOME
@@ -208,8 +227,14 @@ private fun App(keepScreen: (Boolean) -> Unit) {
                     onOpen = { openId = it; screen = Screen.DETAIL },
                     onStats = { screen = Screen.STATS },
                     onSettings = { screen = Screen.SETTINGS },
+                    badges = badges,
+                    onBadges = { screen = Screen.BADGES },
                 )
             }
+        }
+        // new badge earned → full-screen celebration, one at a time
+        fresh.firstOrNull()?.let { def ->
+            if (current != Screen.LIVE) BadgeCelebration(def) { Badges.fresh.value = Badges.fresh.value.drop(1) }
         }
     }
 }

@@ -12,8 +12,8 @@ android {
         applicationId = "com.bachir.sapphire"
         minSdk = 28
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
     signingConfigs {
         create("sapphire") {
@@ -54,4 +54,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     implementation("androidx.health.connect:connect-client:1.1.0")
     implementation("org.maplibre.gl:android-sdk:11.8.1")
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+    implementation("androidx.media:media:1.7.0")
 }

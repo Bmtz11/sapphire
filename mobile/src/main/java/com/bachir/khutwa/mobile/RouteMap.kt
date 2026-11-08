@@ -1,5 +1,7 @@
 package com.bachir.khutwa.mobile
 
+import com.bachir.khutwa.shared.tr
+
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -64,7 +66,9 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillExtrusionLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
@@ -112,6 +116,7 @@ fun speedProfile(pts: List<TrackPoint>): SpeedProfile {
 
 /** Holds the live map + the sources we update for the replay. */
 private class MapHolder {
+    var bearing: Double? = null
     var map: MapLibreMap? = null
     var trail: GeoJsonSource? = null
     var dot: GeoJsonSource? = null
@@ -126,15 +131,16 @@ private class MapHolder {
 fun RouteMap(
     w: Workout, dark: Boolean, modifier: Modifier = Modifier,
     interactive: Boolean = false, satellite: Boolean = false, bySpeed: Boolean = true, replay: Float? = null,
+    threeD: Boolean = Settings.current.map3d,
 ) {
     val ctx = LocalContext.current
     if (w.points.size < 2) {
-        Box(modifier, contentAlignment = Alignment.Center) { Text("ما فيه مسار GPS لهذا التمرين", style = txt(14, Color(0xFFA3A6AD))) }
+        Box(modifier, contentAlignment = Alignment.Center) { Text(tr("ما فيه مسار GPS لهذا التمرين"), style = txt(14, Color(0xFFA3A6AD))) }
         return
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val holder = remember(dark, satellite, w.id, bySpeed) { MapHolder() }
-    val map = remember(dark, satellite, w.id, bySpeed) {
+    val holder = remember(dark, satellite, w.id, bySpeed, threeD) { MapHolder() }
+    val map = remember(dark, satellite, w.id, bySpeed, threeD) {
         MapLibre.getInstance(ctx)
         MapView(ctx).apply { onCreate(null) }
     }
@@ -169,7 +175,16 @@ fun RouteMap(
         val upTo = w.points.take(i + 1).map { Point.fromLngLat(it.lon, it.lat) } + Point.fromLngLat(lon, lat)
         trail.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(if (upTo.size >= 2) upTo else upTo + upTo)))
         holder.dot?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(lon, lat)))
-        if (interactive) holder.map?.moveCamera(CameraUpdateFactory.newLatLng(LatLng(lat, lon)))
+        if (interactive) {
+            val bearing = bearingOf(a.lat, a.lon, b.lat, b.lon)
+            val prevB = holder.bearing ?: bearing
+            val smoothB = prevB + angleDiff(prevB, bearing) * 0.15
+            holder.bearing = smoothB
+            holder.map?.moveCamera(CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder().target(LatLng(lat, lon)).zoom(if (threeD) 16.8 else 16.0)
+                    .tilt(if (threeD) 62.0 else 0.0).bearing(if (threeD) smoothB else 0.0).build()
+            ))
+        }
     }
 
     key(map) {
@@ -179,18 +194,44 @@ fun RouteMap(
                 m.uiSettings.isLogoEnabled = false
                 m.uiSettings.isCompassEnabled = interactive
                 val builder = if (satellite) Style.Builder().fromJson(STYLE_SAT) else Style.Builder().fromUri(if (dark) STYLE_DARK else STYLE_LIGHT)
-                m.setStyle(builder) { style -> drawRoute(style, w, profile, bySpeed, dark || satellite, holder); holder.map = m; fit(m, w) }
+                m.setStyle(builder) { style ->
+                    if (threeD && !satellite) addBuildings(style, dark)
+                    drawRoute(style, w, profile, bySpeed, dark || satellite, holder); holder.map = m; fit(m, w, threeD)
+                }
             }
             map
         }, modifier = modifier)
     }
 }
 
-private fun fit(m: MapLibreMap, w: Workout) {
+private fun fit(m: MapLibreMap, w: Workout, threeD: Boolean) {
     val latLngs = w.points.map { LatLng(it.lat, it.lon) }.distinct()
     if (latLngs.size >= 2) m.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(latLngs).build(), 110))
     else m.moveCamera(CameraUpdateFactory.newLatLngZoom(latLngs.first(), 16.0))
+    if (threeD) m.moveCamera(CameraUpdateFactory.tiltTo(50.0))
 }
+
+/** 3D buildings from the OpenMapTiles data the style already loads. */
+private fun addBuildings(style: Style, dark: Boolean) {
+    if (style.getSource("openmaptiles") == null) return
+    runCatching {
+        style.addLayer(FillExtrusionLayer("sapphire-3d", "openmaptiles").withSourceLayer("building").withProperties(
+            PropertyFactory.fillExtrusionColor(if (dark) "#26292F" else "#D5D8DE"),
+            PropertyFactory.fillExtrusionHeight(Expression.coalesce(Expression.get("render_height"), Expression.literal(6))),
+            PropertyFactory.fillExtrusionBase(Expression.coalesce(Expression.get("render_min_height"), Expression.literal(0))),
+            PropertyFactory.fillExtrusionOpacity(0.8f),
+        ))
+    }
+}
+
+private fun bearingOf(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val p1 = Math.toRadians(lat1); val p2 = Math.toRadians(lat2); val dl = Math.toRadians(lon2 - lon1)
+    val y = kotlin.math.sin(dl) * kotlin.math.cos(p2)
+    val x = kotlin.math.cos(p1) * kotlin.math.sin(p2) - kotlin.math.sin(p1) * kotlin.math.cos(p2) * kotlin.math.cos(dl)
+    return (Math.toDegrees(kotlin.math.atan2(y, x)) + 360) % 360
+}
+
+private fun angleDiff(from: Double, to: Double): Double = ((to - from + 540) % 360) - 180
 
 private fun drawRoute(style: Style, w: Workout, sp: SpeedProfile, bySpeed: Boolean, onDark: Boolean, holder: MapHolder) {
     val pts = w.points
@@ -263,7 +304,7 @@ fun SpeedLegend(w: Workout, modifier: Modifier = Modifier) {
     ) {
         Text(String.format(Locale.US, "%.0f", sp.lo * 3.6), style = numStyle(11.sp, Color.White, FontWeight.Bold))
         Box(Modifier.size(60.dp, 6.dp).clip(RoundedCornerShape(3.dp)).background(Brush.horizontalGradient(listOf(SpeedSlow, SpeedMid, SpeedFast))))
-        Text(String.format(Locale.US, "%.0f كم/س", sp.hi * 3.6), style = numStyle(11.sp, Color.White, FontWeight.Bold))
+        Text(String.format(Locale.US, tr("%.0f كم/س"), sp.hi * 3.6), style = numStyle(11.sp, Color.White, FontWeight.Bold))
     }
 }
 
@@ -302,7 +343,7 @@ fun ReplayBar(st: ReplayState, w: Workout, modifier: Modifier = Modifier) {
         Box(
             Modifier.size(40.dp).clip(CircleShape).background(Color.White).bounceClick { st.active = true; st.playing = !st.playing },
             contentAlignment = Alignment.Center,
-        ) { Icon(if (st.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, "تشغيل المسار", tint = Color(0xFF0B0B0C)) }
+        ) { Icon(if (st.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, tr("تشغيل المسار"), tint = Color(0xFF0B0B0C)) }
         Column(Modifier.weight(1f)) {
             Box(Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = 0.2f))) {
                 Box(Modifier.fillMaxWidth(st.progress).height(5.dp).background(Color.White))
@@ -321,20 +362,25 @@ fun ReplayBar(st: ReplayState, w: Workout, modifier: Modifier = Modifier) {
 fun FullMap(w: Workout, dark: Boolean, startReplay: Boolean, onClose: () -> Unit) {
     var sat by remember { mutableStateOf(false) }
     var bySpeed by remember { mutableStateOf(Settings.current.routeColorBySpeed) }
+    var threeD by remember { mutableStateOf(Settings.current.map3d) }
     val replay = rememberReplay()
     LaunchedEffect(Unit) { if (startReplay) { replay.active = true; replay.playing = true } }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             RouteMap(w, dark, Modifier.fillMaxSize(), interactive = true, satellite = sat, bySpeed = bySpeed,
-                replay = if (replay.active) replay.progress else null)
+                replay = if (replay.active) replay.progress else null, threeD = threeD)
             Row(
                 Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
-                MapBtn(Icons.Filled.Close, "إغلاق", false, onClose)
+                MapBtn(Icons.Filled.Close, tr("إغلاق"), false, onClose)
                 Box(Modifier.weight(1f))
                 ModeToggle(bySpeed) { bySpeed = it }
-                MapBtn(Icons.Outlined.Layers, "قمر صناعي", sat) { sat = !sat }
+                Box(
+                    Modifier.size(46.dp).clip(CircleShape).background(if (threeD) Color.White else Color(0xE6141518)).bounceClick { threeD = !threeD },
+                    contentAlignment = Alignment.Center,
+                ) { Text("3D", style = numStyle(15.sp, if (threeD) Color(0xFF0B0B0C) else Color.White, FontWeight.Bold)) }
+                MapBtn(Icons.Outlined.Layers, tr("قمر صناعي"), sat) { sat = !sat }
             }
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (bySpeed) SpeedLegend(w)
@@ -355,7 +401,7 @@ private fun MapBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, label:
 @Composable
 fun ModeToggle(bySpeed: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.clip(RoundedCornerShape(16.dp)).background(Color(0xE6141518)).padding(3.dp)) {
-        listOf("السرعة" to true, "مشي/جري" to false).forEach { (l, v) ->
+        listOf(tr("السرعة") to true, tr("مشي/جري") to false).forEach { (l, v) ->
             Box(
                 Modifier.clip(RoundedCornerShape(13.dp)).background(if (bySpeed == v) Color.White else Color.Transparent)
                     .bounceClick { onChange(v) }.padding(horizontal = 12.dp, vertical = 8.dp)

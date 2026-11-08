@@ -13,7 +13,7 @@ import android.os.Looper
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
-import com.bachir.khutwa.shared.ArabicCoach
+import com.bachir.khutwa.shared.Coach
 import com.bachir.khutwa.shared.LiveSession
 import com.bachir.khutwa.shared.Notif
 import com.bachir.khutwa.shared.TrackPoint
@@ -69,7 +69,8 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
 
     override fun onCreate() {
         super.onCreate()
-        speaker = TtsSpeaker(this).apply { rate = Settings.current.voiceRate }
+        val st = Settings.current
+        speaker = TtsSpeaker(this, st.english, st.voiceName).apply { rate = st.voiceRate; pitch = st.voicePitch }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -82,9 +83,9 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
                 intent.getIntExtra("goalSec", 0),
             )
             ACTION_STOP -> stopWorkout()
-            ACTION_SPEAK -> speaker.speak(ArabicCoach.status(LiveSession.stats.value))
-            ACTION_PAUSE -> recorder?.let { it.pause(now); publish(); if (coachOn) speaker.speak(ArabicCoach.paused()) }
-            ACTION_RESUME -> recorder?.let { it.resume(now); publish(); if (coachOn) speaker.speak(ArabicCoach.resumed()) }
+            ACTION_SPEAK -> speaker.speak(Coach.status(LiveSession.stats.value))
+            ACTION_PAUSE -> recorder?.let { it.pause(now); publish(); LiveNotif.update(this, LiveSession.stats.value); if (coachOn) speaker.speak(Coach.paused()) }
+            ACTION_RESUME -> recorder?.let { it.resume(now); publish(); LiveNotif.update(this, LiveSession.stats.value); if (coachOn) speaker.speak(Coach.resumed()) }
         }
         return START_NOT_STICKY
     }
@@ -96,7 +97,7 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
         if (recorder != null) return
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         ServiceCompat.startForeground(
-            this, Notif.ID, Notif.build(this, "تمرين شغال", open),
+            this, LiveNotif.ID, LiveNotif.build(this, null),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
         )
         val now = System.currentTimeMillis()
@@ -117,13 +118,16 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
             r.elevationFromBaro = true
             sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
         }
-        if (coachOn) speaker.speak(ArabicCoach.start(type))
-        r.firstInterval()?.let { if (coachOn) speaker.speak(ArabicCoach.phrase(it)) }
+        if (coachOn) speaker.speak(Coach.start(type))
+        r.firstInterval()?.let { if (coachOn) speaker.speak(Coach.phrase(it)) }
 
         ticker = lifecycleScope.launch {
+            var n = 0
             while (isActive) {
-                recorder?.tick(System.currentTimeMillis())?.forEach { speaker.speak(ArabicCoach.phrase(it)) }
-                publish(); delay(1000)
+                recorder?.tick(System.currentTimeMillis())?.forEach { speaker.speak(Coach.phrase(it)) }
+                publish()
+                if (n++ % 3 == 0) LiveNotif.update(this@PhoneWorkoutService, LiveSession.stats.value)
+                delay(1000)
             }
         }
     }
@@ -137,7 +141,7 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
         val w = r.finish(System.currentTimeMillis())
         LiveSession.stats.value = null
         LiveSession.lastWorkout.value = w
-        if (coachOn) speaker.speak(ArabicCoach.finish(w))
+        if (coachOn) speaker.speak(Coach.finish(w))
         WorkoutStore.saveAndSync(this, w)
         lifecycleScope.launch {
             delay(8_000)
@@ -156,7 +160,7 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
                     acc = if (l.hasAccuracy()) l.accuracy else null,
                 )
                 r.onLocation(p, if (l.hasSpeed()) l.speed.toDouble() else null)
-                    .forEach { speaker.speak(ArabicCoach.phrase(it)) }
+                    .forEach { speaker.speak(Coach.phrase(it)) }
                 if (!weatherAsked && (!l.hasAccuracy() || l.accuracy < 100)) { weatherAsked = true; fetchWeather(l.latitude, l.longitude) }
             }
         }
@@ -179,7 +183,7 @@ class PhoneWorkoutService : LifecycleService(), SensorEventListener {
         val t = System.currentTimeMillis()
         when (event.sensor.type) {
             Sensor.TYPE_STEP_COUNTER -> {
-                recorder?.onStepTotal(t, event.values[0].toLong())?.forEach { speaker.speak(ArabicCoach.phrase(it)) }
+                recorder?.onStepTotal(t, event.values[0].toLong())?.forEach { speaker.speak(Coach.phrase(it)) }
                 return
             }
             Sensor.TYPE_PRESSURE -> {
@@ -235,6 +239,49 @@ class WatchListenerService : WearableListenerService() {
     }
 
     override fun onMessageReceived(event: MessageEvent) {
-        if (event.path == "/khutwa/speak") PhoneVoice.speak(applicationContext, event.data.decodeToString())
+        when (event.path) {
+            "/khutwa/speak" -> PhoneVoice.speak(applicationContext, event.data.decodeToString())
+            "/khutwa/media" -> Music.key(applicationContext, event.data.decodeToString())
+            "/khutwa/live" -> RemoteLive.receive(applicationContext, event.sourceNodeId, event.data.decodeToString())
+        }
+    }
+}
+
+
+/** A workout running on the watch, mirrored live on the phone (screen, lock screen and Now Bar). */
+object RemoteLive {
+    const val NOTIF_ID = 8
+    val state = kotlinx.coroutines.flow.MutableStateFlow<com.bachir.khutwa.shared.LiveLite?>(null)
+    private var node: String? = null
+
+    fun receive(ctx: Context, nodeId: String, body: String) {
+        node = nodeId
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+        if (body == "end") {
+            state.value = null
+            nm.cancel(NOTIF_ID)
+            return
+        }
+        val l = runCatching { com.bachir.khutwa.shared.LiveLite.decode(body) }.getOrNull() ?: return
+        state.value = l
+        runCatching { nm.notify(NOTIF_ID, LiveNotif.build(ctx, l.toStats(), remote = true)) }
+    }
+
+    /** Is the mirrored workout still alive (watch sends every 2 s)? */
+    fun fresh(l: com.bachir.khutwa.shared.LiveLite?) = l != null && System.currentTimeMillis() - l.sentMs < 15_000
+
+    fun send(ctx: Context, cmd: String) = AppScope.launch {
+        runCatching {
+            val nodes = node?.let { listOf(it) } ?: Wearable.getNodeClient(ctx).connectedNodes.await().map { it.id }
+            nodes.forEach { Wearable.getMessageClient(ctx).sendMessage(it, "/khutwa/cmd", cmd.toByteArray()).await() }
+        }
+    }
+}
+
+/** Watch connection status for the home screen. */
+object WatchLink {
+    val connected = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    suspend fun check(ctx: Context) {
+        connected.value = runCatching { Wearable.getNodeClient(ctx).connectedNodes.await().firstOrNull { it.isNearby }?.displayName }.getOrNull()
     }
 }

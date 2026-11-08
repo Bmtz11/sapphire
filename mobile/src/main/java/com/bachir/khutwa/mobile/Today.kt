@@ -151,6 +151,8 @@ object TodayReader {
         )
         activeDays.value = days
         today.value = s
+        runCatching { SapphireWidget.push(ctx, s, PhoneSteps.today.value, streak(days)) }
+        runCatching { Badges.refresh(ctx) }
         runCatching { pushToWatch(ctx, s, set) }
     }
 

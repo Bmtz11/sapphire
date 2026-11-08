@@ -1,5 +1,7 @@
 package com.bachir.khutwa.mobile
 
+import com.bachir.khutwa.shared.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -51,7 +53,7 @@ fun PlanEditor(planId: String?, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val p = LocalPalette.current
     val existing = planId?.let { id -> Settings.current.plans.firstOrNull { it.id == id } }
-    var plan by remember { mutableStateOf(existing ?: IntervalPlan(UUID.randomUUID().toString().take(8), "خطتي")) }
+    var plan by remember { mutableStateOf(existing ?: IntervalPlan(UUID.randomUUID().toString().take(8), tr("خطتي"))) }
     var byDistance by remember { mutableStateOf(plan.runM > 0) }
 
     fun save() {
@@ -71,9 +73,9 @@ fun PlanEditor(planId: String?, onDone: () -> Unit) {
         ) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    RoundButton(Icons.AutoMirrored.Filled.ArrowBack, "رجوع", onDone)
-                    Text(if (existing == null) "خطة جري جديدة" else "تعديل الخطة", style = txt(22, p.text, FontWeight.Medium), modifier = Modifier.weight(1f))
-                    if (existing != null && Settings.current.plans.size > 1) RoundButton(Icons.Outlined.DeleteOutline, "حذف") {
+                    RoundButton(Icons.AutoMirrored.Filled.ArrowBack, tr("رجوع"), onDone)
+                    Text(if (existing == null) tr("خطة جري جديدة") else tr("تعديل الخطة"), style = txt(22, p.text, FontWeight.Medium), modifier = Modifier.weight(1f))
+                    if (existing != null && Settings.current.plans.size > 1) RoundButton(Icons.Outlined.DeleteOutline, tr("حذف")) {
                         Settings.update(ctx) { s -> s.copy(plans = s.plans.filter { it.id != existing.id }) }
                         onDone()
                     }
@@ -98,11 +100,11 @@ fun PlanEditor(planId: String?, onDone: () -> Unit) {
             item {
                 PlainCard(Modifier.fillMaxWidth(), radius = 26.dp) {
                     Column {
-                        Row2("الإحماء (مشي خفيف)") { Step(Fmt.duration(plan.warmupSec * 1000L), { plan = plan.copy(warmupSec = (plan.warmupSec - 60).coerceAtLeast(0)) }, { plan = plan.copy(warmupSec = plan.warmupSec + 60) }) }
+                        Row2(tr("الإحماء (مشي خفيف)")) { Step(Fmt.duration(plan.warmupSec * 1000L), { plan = plan.copy(warmupSec = (plan.warmupSec - 60).coerceAtLeast(0)) }, { plan = plan.copy(warmupSec = plan.warmupSec + 60) }) }
                         Line()
-                        Row2("الجري بـ") {
+                        Row2(tr("الجري بـ")) {
                             Row(Modifier.clip(RoundedCornerShape(14.dp)).background(p.bg).padding(3.dp)) {
-                                listOf("وقت" to false, "مسافة" to true).forEach { (l, v) ->
+                                listOf(tr("وقت") to false, tr("مسافة") to true).forEach { (l, v) ->
                                     Box(Modifier.clip(RoundedCornerShape(11.dp)).background(if (byDistance == v) p.invBg else p.bg)
                                         .bounceClick { byDistance = v; if (v && plan.runM == 0) plan = plan.copy(runM = 400) }.padding(horizontal = 14.dp, vertical = 7.dp)) {
                                         Text(l, style = txt(13, if (byDistance == v) p.invText else p.muted, FontWeight.Medium))
@@ -111,19 +113,19 @@ fun PlanEditor(planId: String?, onDone: () -> Unit) {
                             }
                         }
                         Line()
-                        if (byDistance) Row2("مسافة كل جري") { Step("${plan.runM} م", { plan = plan.copy(runM = (plan.runM - 100).coerceAtLeast(100)) }, { plan = plan.copy(runM = plan.runM + 100) }) }
-                        else Row2("وقت كل جري") { Step(Fmt.duration(plan.runSec * 1000L), { plan = plan.copy(runSec = (plan.runSec - 30).coerceAtLeast(30)) }, { plan = plan.copy(runSec = plan.runSec + 30) }) }
+                        if (byDistance) Row2(tr("مسافة كل جري")) { Step(tr("{0} م", plan.runM), { plan = plan.copy(runM = (plan.runM - 100).coerceAtLeast(100)) }, { plan = plan.copy(runM = plan.runM + 100) }) }
+                        else Row2(tr("وقت كل جري")) { Step(Fmt.duration(plan.runSec * 1000L), { plan = plan.copy(runSec = (plan.runSec - 30).coerceAtLeast(30)) }, { plan = plan.copy(runSec = plan.runSec + 30) }) }
                         Line()
-                        Row2("مشي بين الجري") { Step(Fmt.duration(plan.walkSec * 1000L), { plan = plan.copy(walkSec = (plan.walkSec - 15).coerceAtLeast(0)) }, { plan = plan.copy(walkSec = plan.walkSec + 15) }) }
+                        Row2(tr("مشي بين الجري")) { Step(Fmt.duration(plan.walkSec * 1000L), { plan = plan.copy(walkSec = (plan.walkSec - 15).coerceAtLeast(0)) }, { plan = plan.copy(walkSec = plan.walkSec + 15) }) }
                         Line()
-                        Row2("عدد التكرار") { Step("${plan.repeats}×", { plan = plan.copy(repeats = (plan.repeats - 1).coerceAtLeast(1)) }, { plan = plan.copy(repeats = (plan.repeats + 1).coerceAtMost(30)) }) }
+                        Row2(tr("عدد التكرار")) { Step("${plan.repeats}×", { plan = plan.copy(repeats = (plan.repeats - 1).coerceAtLeast(1)) }, { plan = plan.copy(repeats = (plan.repeats + 1).coerceAtMost(30)) }) }
                         Line()
-                        Row2("التهدئة") { Step(Fmt.duration(plan.cooldownSec * 1000L), { plan = plan.copy(cooldownSec = (plan.cooldownSec - 60).coerceAtLeast(0)) }, { plan = plan.copy(cooldownSec = plan.cooldownSec + 60) }) }
+                        Row2(tr("التهدئة")) { Step(Fmt.duration(plan.cooldownSec * 1000L), { plan = plan.copy(cooldownSec = (plan.cooldownSec - 60).coerceAtLeast(0)) }, { plan = plan.copy(cooldownSec = plan.cooldownSec + 60) }) }
                     }
                 }
             }
         }
-        CtaPill("حفظ واستخدام الخطة", Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 18.dp, vertical = 16.dp), onClick = { save() })
+        CtaPill(tr("حفظ واستخدام الخطة"), Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 18.dp, vertical = 16.dp), onClick = { save() })
     }
 }
 
@@ -144,11 +146,11 @@ private fun Step(value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
     val p = LocalPalette.current
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(Modifier.size(36.dp).clip(CircleShape).border(1.dp, p.line, CircleShape).bounceClick(onClick = onMinus), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Remove, "ناقص", tint = p.text, modifier = Modifier.size(18.dp))
+            Icon(Icons.Filled.Remove, tr("ناقص"), tint = p.text, modifier = Modifier.size(18.dp))
         }
         Text(value, style = numStyle(18.sp, p.text, FontWeight.Bold), modifier = Modifier.width(76.dp), textAlign = TextAlign.Center)
         Box(Modifier.size(36.dp).clip(CircleShape).border(1.dp, p.line, CircleShape).bounceClick(onClick = onPlus), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Add, "زائد", tint = p.text, modifier = Modifier.size(18.dp))
+            Icon(Icons.Filled.Add, tr("زائد"), tint = p.text, modifier = Modifier.size(18.dp))
         }
     }
 }

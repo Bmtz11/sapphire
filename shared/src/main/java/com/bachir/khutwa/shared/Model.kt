@@ -12,22 +12,23 @@ import java.util.zip.GZIPOutputStream
 enum class Mode { WALK, RUN }
 
 /** What the user picked before starting. */
-enum class WorkoutType(val ar: String, val gps: Boolean = true, val walkRun: Boolean = true) {
-    WALK("مشي"),
-    RUN("جري"),
-    INTERVALS("جري مخصص"),
-    HIKE("هايكنج"),
-    TREADMILL("سير/جري داخلي", gps = false),
-    CYCLING("دراجة", walkRun = false),
-    FOOTBALL("كرة قدم", walkRun = false),
+enum class WorkoutType(private val arName: String, val gps: Boolean = true, val walkRun: Boolean = true) {
+    WALK("مشي"), // notr
+    RUN("جري"), // notr
+    INTERVALS("جري مخصص"), // notr
+    HIKE("هايكنج"), // notr
+    TREADMILL("سير/جري داخلي", gps = false), // notr
+    CYCLING("دراجة", walkRun = false), // notr
+    FOOTBALL("كرة قدم", walkRun = false); // notr
+    val ar get() = tr(arName)
 }
 
 /** One block of a custom (interval) run. Ends by time or by distance. */
 @Serializable
 data class IntervalStep(val kind: Kind, val sec: Int = 0, val meters: Int = 0) {
-    enum class Kind(val ar: String) { WARMUP("إحماء"), RUN("جري"), WALK("مشي"), COOLDOWN("تهدئة") }
-    val label get() = if (meters > 0) "${kind.ar} ${if (meters >= 1000) "${meters / 1000.0} كم" else "$meters متر"}"
-    else "${kind.ar} ${if (sec % 60 == 0) "${sec / 60} د" else "${sec / 60}:${"%02d".format(sec % 60)}"}"
+    enum class Kind(private val arName: String) { WARMUP("إحماء"), RUN("جري"), WALK("مشي"), COOLDOWN("تهدئة"); val ar get() = tr(arName) } // notr
+    val label get() = if (meters > 0) "${kind.ar} ${if (meters >= 1000) tr("{0} كم", meters / 1000.0) else tr("{0} متر", meters)}"
+    else "${kind.ar} ${if (sec % 60 == 0) tr("{0} د", sec / 60) else "${sec / 60}:${"%02d".format(sec % 60)}"}"
 }
 
 @Serializable
@@ -79,6 +80,8 @@ data class CoachConfig(
     val autoPause: Boolean = false,
     val profile: Profile = Profile(),
     val plan: IntervalPlan? = null,     // active custom run (for INTERVALS)
+    val english: Boolean = false,
+    val voiceName: String? = null,
 ) {
     companion object {
         fun encode(c: CoachConfig) = WorkoutJson.json.encodeToString(serializer(), c)
@@ -95,14 +98,14 @@ data class WeatherInfo(
     val code: Int,
 ) {
     val ar get() = when (code) {
-        0 -> "صافي"
-        1, 2 -> "غائم جزئياً"
-        3 -> "غائم"
-        45, 48 -> "ضباب"
-        in 51..67 -> "مطر"
-        in 71..77 -> "ثلج"
-        in 80..82 -> "زخات مطر"
-        in 95..99 -> "عواصف"
+        0 -> tr("صافي")
+        1, 2 -> tr("غائم جزئياً")
+        3 -> tr("غائم")
+        45, 48 -> tr("ضباب")
+        in 51..67 -> tr("مطر")
+        in 71..77 -> tr("ثلج")
+        in 80..82 -> tr("زخات مطر")
+        in 95..99 -> tr("عواصف")
         else -> "—"
     }
 }
@@ -189,9 +192,9 @@ data class Workout(
     val title get() = when {
         planName != null -> planName
         !type.walkRun || type == WorkoutType.HIKE || type == WorkoutType.TREADMILL -> type.ar
-        runM > 50 && walkM > 50 -> "مشي + جري"
-        runM > 50 -> "جري"
-        else -> "مشي"
+        runM > 50 && walkM > 50 -> tr("مشي + جري")
+        runM > 50 -> tr("جري")
+        else -> tr("مشي")
     }
     val avgPaceSec get() = if (distanceM > 50) ((activeMs / 1000.0) / (distanceM / 1000.0)).toInt() else null
     val avgCadence get() = if (activeMs > 60_000 && steps > 0) (steps * 60_000L / activeMs).toInt() else null
@@ -271,5 +274,44 @@ object Fmt {
         val s = (ms / 1000).coerceAtLeast(0)
         return if (s >= 3600) String.format(Locale.US, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
         else String.format(Locale.US, "%02d:%02d", s / 60, s % 60)
+    }
+}
+
+/** Compact live snapshot the watch streams to the phone every 2 s. */
+@Serializable
+data class LiveLite(
+    val type: WorkoutType,
+    val mode: Mode,
+    val elapsedMs: Long,
+    val distanceM: Double,
+    val paceSec: Int? = null,
+    val hr: Int? = null,
+    val zone: Int = 0,
+    val steps: Int = 0,
+    val cadence: Int? = null,
+    val kcal: Int = 0,
+    val paused: Boolean = false,
+    val goalM: Int = 0,
+    val goalSec: Int = 0,
+    val ascentM: Double = 0.0,
+    val speedKmh: Double = 0.0,
+    val runM: Double = 0.0,
+    val walkM: Double = 0.0,
+    val sprints: Int = 0,
+    val sentMs: Long = 0,
+) {
+    fun toStats() = LiveStats(
+        mode = mode, elapsedMs = elapsedMs, distanceM = distanceM, paceSec = paceSec, avgPaceSec = null, hr = hr,
+        runM = runM, walkM = walkM, gpsOk = true, type = type, sprints = sprints, paused = paused, zone = zone,
+        goalM = goalM, goalSec = goalSec, steps = steps, cadence = cadence, kcal = kcal, ascentM = ascentM, speedKmh = speedKmh,
+    )
+
+    companion object {
+        fun of(s: LiveStats) = LiveLite(
+            s.type, s.mode, s.elapsedMs, s.distanceM, s.paceSec, s.hr, s.zone, s.steps, s.cadence, s.kcal, s.paused,
+            s.goalM, s.goalSec, s.ascentM, s.speedKmh, s.runM, s.walkM, s.sprints, System.currentTimeMillis(),
+        )
+        fun encode(l: LiveLite) = WorkoutJson.json.encodeToString(serializer(), l)
+        fun decode(s: String) = WorkoutJson.json.decodeFromString(serializer(), s)
     }
 }

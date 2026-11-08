@@ -1,4 +1,7 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 package com.bachir.khutwa.wear
+
+import com.bachir.khutwa.shared.tr
 
 import android.Manifest
 import android.os.Build
@@ -11,6 +14,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -133,7 +138,7 @@ object WatchToday {
         if (item.uri.path != "/khutwa/today") return
         val map = DataMapItem.fromDataItem(item).dataMap
         map.getString("json")?.let { runCatching { today.value = TodaySummary.decode(it) } }
-        map.getString("coach")?.let { runCatching { coach.value = CoachConfig.decode(it) } }
+        map.getString("coach")?.let { runCatching { coach.value = CoachConfig.decode(it); com.bachir.khutwa.shared.Tr.en = coach.value.english } }
     }
 }
 
@@ -212,7 +217,7 @@ private fun HomeScreen(today: TodaySummary?, onStart: (WorkoutType) -> Unit) {
         item { Text(SimpleDateFormat("h:mm", Locale.US).format(now), style = txt(14, weight = FontWeight.SemiBold)) }
         item { StepsCard(today) }
         item { HeartCard(today) }
-        item { Text("ابدأ تمرين", style = txt(12, Muted), modifier = Modifier.padding(top = 4.dp)) }
+        item { Text(tr("ابدأ تمرين"), style = txt(12, Muted), modifier = Modifier.padding(top = 4.dp)) }
         items(WorkoutType.entries.size) { i ->
             val t = WorkoutType.entries[i]
             val tone = when (t) {
@@ -228,7 +233,7 @@ private fun HomeScreen(today: TodaySummary?, onStart: (WorkoutType) -> Unit) {
                 Column(Modifier.align(Alignment.CenterStart)) {
                     Text(t.ar, style = txt(13, weight = FontWeight.SemiBold))
                     if (t == WorkoutType.INTERVALS) WatchToday.coach.value.plan?.let { Text(it.name, style = txt(9, Color.White.copy(alpha = 0.9f)), maxLines = 1) }
-                    else if (i == 0) Text("يكتشف الجري تلقائياً", style = txt(9, Color.White.copy(alpha = 0.92f)))
+                    else if (i == 0) Text(tr("يكتشف الجري تلقائياً"), style = txt(9, Color.White.copy(alpha = 0.92f)))
                 }
                 Box(Modifier.align(Alignment.CenterEnd).size(24.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) { PlayTriangle() }
             }
@@ -252,8 +257,8 @@ private fun StepsCard(t: TodaySummary?) {
     ToneBox(Tone.STEPS, Modifier.fillMaxWidth(0.82f).height(76.dp), 24.dp, 11.dp) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(Modifier.fillMaxWidth()) {
-                Text("خطوات اليوم", style = txt(10, weight = FontWeight.Medium), modifier = Modifier.weight(1f))
-                Text("${(steps * 100 / goal)}٪", style = txt(9, Color.White.copy(alpha = 0.88f)))
+                Text(tr("خطوات اليوم"), style = txt(10, weight = FontWeight.Medium), modifier = Modifier.weight(1f))
+                Text(tr("{0}٪", (steps * 100 / goal)), style = txt(9, Color.White.copy(alpha = 0.88f)))
             }
             Text(if (t == null) "--" else "%,d".format(Locale.US, steps), style = doto(30.sp))
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -268,7 +273,7 @@ private fun HeartCard(t: TodaySummary?) {
     ToneBox(Tone.HEART, Modifier.fillMaxWidth(0.72f).height(56.dp), 22.dp, 11.dp) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("نبض القلب", style = txt(9))
+                Text(tr("نبض القلب"), style = txt(9))
                 Text("${t?.hr ?: "--"}", style = txt(18, weight = FontWeight.Medium))
             }
             Canvas(Modifier.size(48.dp, 16.dp)) {
@@ -294,14 +299,20 @@ private fun LiveScreen(s: LiveStats, onTapPace: () -> Unit, onEnd: () -> Unit) {
     val color = when { s.paused -> Color(0xFF6B6F76); football -> Color(0xFF3DD68C); s.mode == Mode.RUN -> RunOrange; else -> WalkBlue }
     val glow = when { football -> Color(0xFF2E7A50); s.mode == Mode.RUN -> RunOrange; else -> Color(0xFF2A6FD6) }
     val label = when {
-        s.paused -> "متوقف"
+        s.paused -> tr("متوقف")
         s.interval != null -> "${s.interval!!.step.kind.ar} ${s.interval!!.index + 1}/${s.interval!!.total}"
         !s.type.walkRun || s.type == WorkoutType.HIKE -> s.type.ar
-        s.mode == Mode.RUN -> "جري"
-        else -> "مشي"
+        s.mode == Mode.RUN -> tr("جري")
+        else -> tr("مشي")
     }
-    // progress ring: fraction of the current kilometer
-    val kmFrac = ((s.distanceM % 1000) / 1000).toFloat()
+    // progress ring: goal progress when a goal is set, otherwise the current kilometer
+    val goalFrac = when {
+        s.goalSec > 0 -> (s.elapsedMs / 1000f / s.goalSec).coerceIn(0f, 1f)
+        s.goalM > 0 -> (s.distanceM / s.goalM).toFloat().coerceIn(0f, 1f)
+        else -> null
+    }
+    val kmFrac by androidx.compose.animation.core.animateFloatAsState(goalFrac ?: ((s.distanceM % 1000) / 1000).toFloat(), label = "ring")
+    val runner = androidx.compose.ui.res.painterResource(R.drawable.ic_run)
 
     Box(Modifier.fillMaxSize().blobs(Blob(glow.copy(alpha = 0.9f), 0.5f, 0.3f, 0.75f), Blob(Color(0xFF070708), 0.5f, 0.3f, 0.28f))) {
         Canvas(Modifier.fillMaxSize()) {
@@ -309,6 +320,17 @@ private fun LiveScreen(s: LiveStats, onTapPace: () -> Unit, onEnd: () -> Unit) {
             drawCircle(Color(0xFF1C1D21), radius = size.minDimension / 2 - sw, style = Stroke(sw))
             drawArc(color, -90f, 360f * kmFrac, false,
                 Offset(sw, sw), androidx.compose.ui.geometry.Size(size.width - sw * 2, size.height - sw * 2), style = Stroke(sw, cap = StrokeCap.Round))
+            if (goalFrac != null) {
+                // little runner riding the goal ring
+                val a = Math.toRadians((-90.0 + 360.0 * kmFrac))
+                val r = size.minDimension / 2 - sw
+                val c = Offset(size.width / 2 + (r * kotlin.math.cos(a)).toFloat(), size.height / 2 + (r * kotlin.math.sin(a)).toFloat())
+                val d = 16.dp.toPx()
+                drawCircle(color, d * 0.62f, c)
+                translate(c.x - d / 2, c.y - d / 2) {
+                    with(runner) { draw(androidx.compose.ui.geometry.Size(d, d), colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color(0xFF0B0B0C))) }
+                }
+            }
         }
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -320,32 +342,32 @@ private fun LiveScreen(s: LiveStats, onTapPace: () -> Unit, onEnd: () -> Unit) {
             val iv = s.interval
             val left = if (s.goalSec > 0) (s.goalSec - s.elapsedMs / 1000).coerceAtLeast(0) else null
             val big = when {
-                iv != null -> iv.remainingSec?.let { Fmt.duration(it * 1000L) } ?: "${iv.remainingM}م"
+                iv != null -> iv.remainingSec?.let { Fmt.duration(it * 1000L) } ?: tr("{0}م", iv.remainingM)
                 left != null -> Fmt.duration(left * 1000)
                 s.type == WorkoutType.CYCLING -> String.format(java.util.Locale.US, "%.1f", s.speedKmh)
                 else -> Fmt.pace(s.paceSec)
             }
             val sub = when {
                 iv != null -> iv.step.label + (iv.next?.let { " ← ${it.kind.ar}" } ?: "")
-                left != null -> "متبقي • ${Fmt.pace(s.paceSec)}"
-                s.type == WorkoutType.CYCLING -> "كم/س"
-                else -> "الوتيرة /كم"
+                left != null -> tr("متبقي • {0}", Fmt.pace(s.paceSec))
+                s.type == WorkoutType.CYCLING -> tr("كم/س")
+                else -> tr("الوتيرة /كم")
             }
             Text(big, style = doto(44.sp), modifier = Modifier.clickable(onClick = onTapPace))
             Text(sub, style = txt(9, Color.White.copy(alpha = 0.9f)), maxLines = 1)
-            if (s.steps > 0 || s.kcal > 0) Text("${s.steps} خطوة • ${s.kcal} سعرة" + if (s.ascentM > 3) " • ↑${s.ascentM.roundToInt()}م" else "", style = txt(9, Muted))
+            if (s.steps > 0 || s.kcal > 0) Text(tr("{0} خطوة • {1} سعرة", s.steps, s.kcal) + if (s.ascentM > 3) tr(" • ↑{0}م", s.ascentM.roundToInt()) else "", style = txt(9, Muted))
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 ToneBox(Tone.HEART, Modifier.width(70.dp).height(38.dp), 14.dp, 7.dp) {
                     Column {
-                        Text("النبض", style = txt(9, Color.White.copy(alpha = 0.85f)))
+                        Text(tr("النبض"), style = txt(9, Color.White.copy(alpha = 0.85f)))
                         Text("${s.hr ?: "--"} ♥", style = txt(13, weight = FontWeight.SemiBold))
                     }
                 }
                 ToneBox(Tone.SLEEP, Modifier.width(70.dp).height(38.dp), 14.dp, 7.dp) {
                     Column {
-                        Text(if (football) "سبرنت" else "المسافة", style = txt(9, Color.White.copy(alpha = 0.85f)))
-                        Text(if (football) "${s.sprints}" else "${Fmt.dist(s.distanceM)} كم", style = txt(13, weight = FontWeight.SemiBold))
+                        Text(if (football) tr("سبرنت") else tr("المسافة"), style = txt(9, Color.White.copy(alpha = 0.85f)))
+                        Text(if (football) "${s.sprints}" else tr("{0} كم", Fmt.dist(s.distanceM)), style = txt(13, weight = FontWeight.SemiBold))
                     }
                 }
             }
@@ -356,10 +378,16 @@ private fun LiveScreen(s: LiveStats, onTapPace: () -> Unit, onEnd: () -> Unit) {
                         .clickable { if (s.paused) ExerciseService.resume(ctx) else ExerciseService.pause(ctx) },
                     contentAlignment = Alignment.Center,
                 ) { Text(if (s.paused) "▶" else "II", style = txt(11, Color(0xFF0B0B0C), FontWeight.Bold)) }
+                // music on the phone: tap = play/pause, long tap = next
+                Box(
+                    Modifier.size(30.dp).clip(CircleShape).background(Color(0xFF1DB954))
+                        .combinedClickable(onClick = { PhoneLink.media(ctx, "playpause") }, onLongClick = { PhoneLink.media(ctx, "next") }),
+                    contentAlignment = Alignment.Center,
+                ) { Text("♫", style = txt(12, Color(0xFF0B0B0C), FontWeight.Bold)) }
                 Box(
                     Modifier.clip(RoundedCornerShape(12.dp)).background(if (confirm) Color(0xFFE53935) else Color(0xFF1C1D21))
                         .clickable { if (confirm) onEnd() else confirm = true }.padding(horizontal = 14.dp, vertical = 6.dp)
-                ) { Text(if (confirm) "تأكيد" else "إنهاء", style = txt(10)) }
+                ) { Text(if (confirm) tr("تأكيد") else tr("إنهاء"), style = txt(10)) }
             }
         }
     }
@@ -376,24 +404,24 @@ private fun SummaryScreen(w: Workout, onDone: () -> Unit) {
                 Box(Modifier.size(14.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
                     Text("✓", style = txt(9, Color(0xFF0B0B0C), FontWeight.Bold))
                 }
-                Text("انتهى التمرين", style = txt(10, weight = FontWeight.SemiBold))
+                Text(tr("انتهى التمرين"), style = txt(10, weight = FontWeight.SemiBold))
             }
             ToneBox(Tone.STEPS, Modifier.width(165.dp).height(68.dp), 22.dp, 10.dp) {
                 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                         Text(Fmt.dist(w.distanceM), style = doto(32.sp), modifier = Modifier.weight(1f))
-                        Text("كم • ${w.title}", style = txt(9, Color.White.copy(alpha = 0.9f)))
+                        Text(tr("كم • {0}", w.title), style = txt(9, Color.White.copy(alpha = 0.9f)))
                     }
                     if (!football) SegBar(w)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Mini(Tone.SLEEP, Fmt.duration(w.durationMs), "الوقت")
-                if (football) Mini(Tone.RUN, "${w.sprints}", "سبرنت")
-                else Mini(Tone.RUN, Fmt.dist(w.runM), "جري كم")
-                Mini(Tone.HEART, "${w.avgHr ?: "--"}", "النبض")
+                Mini(Tone.SLEEP, Fmt.duration(w.durationMs), tr("الوقت"))
+                if (football) Mini(Tone.RUN, "${w.sprints}", tr("سبرنت"))
+                else Mini(Tone.RUN, Fmt.dist(w.runM), tr("جري كم"))
+                Mini(Tone.HEART, "${w.avgHr ?: "--"}", tr("النبض"))
             }
-            Text(if (football) "أعلى سرعة ${(w.maxSpeedMps * 3.6).roundToInt()} كم/س" else "ينرسل للجوال تلقائياً", style = txt(9, Muted))
+            Text(if (football) tr("أعلى سرعة {0} كم/س", (w.maxSpeedMps * 3.6).roundToInt()) else tr("ينرسل للجوال تلقائياً"), style = txt(9, Muted))
         }
     }
 }

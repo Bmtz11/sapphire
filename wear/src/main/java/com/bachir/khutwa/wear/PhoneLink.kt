@@ -29,6 +29,32 @@ object PhoneLink {
         }
     }
 
+    @Volatile private var nodes: List<String>? = null
+    @Volatile private var nodesAt = 0L
+
+    /** Live mirror of the running workout to the phone (cheap MessageClient, node list cached 30 s). */
+    fun sendLive(ctx: Context, body: String) {
+        scope.launch {
+            runCatching {
+                val now = System.currentTimeMillis()
+                val ids = nodes?.takeIf { now - nodesAt < 30_000 }
+                    ?: Wearable.getNodeClient(ctx).connectedNodes.await().map { it.id }.also { nodes = it; nodesAt = now }
+                ids.forEach { Wearable.getMessageClient(ctx).sendMessage(it, "/khutwa/live", body.toByteArray()).await() }
+            }
+        }
+    }
+
+    /** Media control on the phone's player (play/pause/next/prev). */
+    fun media(ctx: Context, key: String) {
+        scope.launch {
+            runCatching {
+                Wearable.getNodeClient(ctx).connectedNodes.await().forEach {
+                    Wearable.getMessageClient(ctx).sendMessage(it.id, "/khutwa/media", key.toByteArray()).await()
+                }
+            }
+        }
+    }
+
     /** Data Layer keeps the item and delivers it whenever the phone reconnects. */
     suspend fun sendWorkout(ctx: Context, w: Workout) {
         val req = PutDataMapRequest.create(PATH_WORKOUT + w.id).apply {
@@ -45,5 +71,19 @@ object WatchStore {
         File(dir, "${w.id}.json").writeText(WorkoutJson.encode(w))
         // keep only the last 20 on the watch
         dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(20)?.forEach { it.delete() }
+    }
+}
+
+
+/** Commands from the phone while the workout runs on the watch. */
+class WatchCmdListener : com.google.android.gms.wearable.WearableListenerService() {
+    override fun onMessageReceived(event: com.google.android.gms.wearable.MessageEvent) {
+        if (event.path != "/khutwa/cmd") return
+        when (event.data.decodeToString()) {
+            "pause" -> ExerciseService.pause(this)
+            "resume" -> ExerciseService.resume(this)
+            "stop" -> ExerciseService.stop(this)
+            "speak" -> ExerciseService.speakStatus(this)
+        }
     }
 }

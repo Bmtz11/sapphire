@@ -13,6 +13,7 @@ import androidx.health.connect.client.records.metadata.Device
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.units.Length
 import com.bachir.khutwa.shared.AppSettings
+import com.bachir.khutwa.shared.Tr
 import com.bachir.khutwa.shared.Mode
 import com.bachir.khutwa.shared.TtsSpeaker
 import com.bachir.khutwa.shared.Workout
@@ -57,7 +58,7 @@ object WorkoutStore {
     fun get(id: String) = workouts.value.firstOrNull { it.id == id }
 
     fun delete(ctx: Context, id: String) {
-        File(dir(ctx), "$id.json").delete(); refresh(ctx)
+        File(dir(ctx), "${id}.json").delete(); refresh(ctx)
     }
 
     /** Save, then push to Health Connect. Called for phone workouts and ones arriving from the watch. */
@@ -174,9 +175,13 @@ object HealthSync {
 object Settings {
     val state = MutableStateFlow(AppSettings())
     private fun p(ctx: Context) = ctx.getSharedPreferences("sapphire", Context.MODE_PRIVATE)
-    fun load(ctx: Context) { state.value = AppSettings.decode(p(ctx).getString("settings", null) ?: "{}") }
+    fun load(ctx: Context) {
+        state.value = AppSettings.decode(p(ctx).getString("settings", null) ?: "{}")
+        Tr.en = state.value.english
+    }
     fun update(ctx: Context, f: (AppSettings) -> AppSettings) {
         val n = f(state.value)
+        Tr.en = n.english
         state.value = n
         p(ctx).edit().putString("settings", AppSettings.encode(n)).apply()
         AppScope.launch { runCatching { TodayReader.pushSettings(ctx, n) } }
@@ -188,7 +193,7 @@ object Settings {
 object PhoneVoice {
     @Volatile private var speaker: TtsSpeaker? = null
     fun speak(ctx: Context, text: String) {
-        val s = speaker ?: synchronized(this) { speaker ?: TtsSpeaker(ctx).also { speaker = it } }
+        val s = speaker ?: synchronized(this) { speaker ?: TtsSpeaker(ctx, Settings.current.english, Settings.current.voiceName).also { speaker = it } }
         s.speak(text)
     }
 }

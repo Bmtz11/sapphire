@@ -1,5 +1,7 @@
 package com.bachir.khutwa.mobile
 
+import com.bachir.khutwa.shared.tr
+
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -60,16 +62,16 @@ fun StatsScreen(workouts: List<Workout>, week: List<DaySteps>, activeDays: Set<L
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                RoundButton(Icons.AutoMirrored.Filled.ArrowBack, "رجوع", onBack)
-                Text("الإحصائيات", style = txt(22, p.text, FontWeight.SemiBold))
+                RoundButton(Icons.AutoMirrored.Filled.ArrowBack, tr("رجوع"), onBack)
+                Text(tr("الإحصائيات"), style = txt(22, p.text, FontWeight.SemiBold))
             }
         }
         item { StepsWeek(week, set.stepGoal, Modifier.enter(0)) }
         item {
             Row(Modifier.enter(1), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Tile(CardTone.WORKOUTS, "هذا الأسبوع", "%.1f".format(Locale.US, weekKm), "كم", Modifier.weight(1f))
-                Tile(CardTone.SLEEP, "هذا الشهر", "%.1f".format(Locale.US, monthKm), "كم", Modifier.weight(1f))
-                Tile(CardTone.MINUTES, "الاستمرارية", "$streak", if (streak == 1) "يوم" else "أيام", Modifier.weight(1f))
+                Tile(CardTone.WORKOUTS, tr("هذا الأسبوع"), "%.1f".format(Locale.US, weekKm), tr("كم"), Modifier.weight(1f))
+                Tile(CardTone.SLEEP, tr("هذا الشهر"), "%.1f".format(Locale.US, monthKm), tr("كم"), Modifier.weight(1f))
+                Tile(CardTone.MINUTES, tr("الاستمرارية"), "${streak}", if (streak == 1) tr("يوم") else tr("أيام"), Modifier.weight(1f))
             }
         }
         item { WeekGoalCard(weekKm, set.weeklyGoalKm, Modifier.enter(2)) }
@@ -85,7 +87,7 @@ private fun Tile(tone: CardTone, label: String, value: String, unit: String, mod
             Text(label, style = txt(12, Color.White))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(value, style = numStyle(32.sp, Color.White))
-                Text(" $unit", style = txt(11, Color.White.copy(alpha = 0.85f)), modifier = Modifier.padding(bottom = 5.dp))
+                Text(" ${unit}", style = txt(11, Color.White.copy(alpha = 0.85f)), modifier = Modifier.padding(bottom = 5.dp))
             }
         }
     }
@@ -100,12 +102,12 @@ private fun StepsWeek(week: List<DaySteps>, goal: Int, modifier: Modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
-                    Text("الخطوات — آخر ٧ أيام", style = txt(15, p.text, FontWeight.SemiBold))
-                    Text("المتوسط اليومي", style = txt(12, p.muted))
+                    Text(tr("الخطوات — آخر ٧ أيام"), style = txt(15, p.text, FontWeight.SemiBold))
+                    Text(tr("المتوسط اليومي"), style = txt(12, p.muted))
                 }
                 CountText(avg, numStyle(30.sp, p.text))
             }
-            if (week.isEmpty()) Text("اربط Samsung Health عشان تظهر الخطوات.", style = txt(13, p.muted))
+            if (week.isEmpty()) Text(tr("اربط Samsung Health عشان تظهر الخطوات."), style = txt(13, p.muted))
             else Box(Modifier.fillMaxWidth().height(150.dp)) {
                 // goal line
                 val goalFrac = goal / max
@@ -125,7 +127,7 @@ private fun StepsWeek(week: List<DaySteps>, goal: Int, modifier: Modifier) {
                                     .background(if (hit) FootballGreen else if (today) p.text else p.muted.copy(alpha = 0.45f))
                             )
                             Spacer(Modifier.height(6.dp))
-                            Text(d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale("ar")).take(3),
+                            Text(d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, appLocale()).take(3),
                                 style = txt(10, if (today) p.text else p.muted, if (today) FontWeight.Bold else FontWeight.Normal), maxLines = 1)
                         }
                     }
@@ -145,8 +147,8 @@ private fun MonthDots(days: Set<LocalDate>, modifier: Modifier) {
     PlainCard(modifier.fillMaxWidth(), radius = 30.dp, pad = 18.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row {
-                Text(first.month.getDisplayName(TextStyle.FULL, Locale("ar")), style = txt(15, p.text, FontWeight.SemiBold), modifier = Modifier.weight(1f))
-                Text("${days.count { it.month == first.month && it.year == first.year }} يوم تمرين".ar(), style = txt(12, p.muted))
+                Text(first.month.getDisplayName(TextStyle.FULL, appLocale()), style = txt(15, p.text, FontWeight.SemiBold), modifier = Modifier.weight(1f))
+                Text(tr("{0} يوم تمرين", days.count { it.month == first.month && it.year == first.year }).ar(), style = txt(12, p.muted))
             }
             val cells = List(lead) { null } + (1..len).map { first.withDayOfMonth(it) }
             cells.chunked(7).forEach { row ->
@@ -188,16 +190,16 @@ private fun Records(workouts: List<Workout>, onOpen: (String) -> Unit, modifier:
     val mostSprints = workouts.filter { it.type == WorkoutType.FOOTBALL }.maxByOrNull { it.sprints }?.takeIf { it.sprints > 0 }
 
     val rows = buildList {
-        fastestKm?.let { add(Triple("أسرع كيلو", "${Fmt.pace(it.first)} /كم", it.second)) }
-        longest?.let { add(Triple("أطول مسافة", "${Fmt.dist(it.distanceM)} كم", it)) }
-        longestRun?.let { add(Triple("أطول جري", "${Fmt.dist(it.runM)} كم", it)) }
-        topSpeed?.let { add(Triple("أعلى سرعة", "${(it.maxSpeedMps * 3.6).roundToInt()} كم/س", it)) }
-        mostSprints?.let { add(Triple("أكثر سبرنتات", "${it.sprints}", it)) }
+        fastestKm?.let { add(Triple(tr("أسرع كيلو"), tr("{0} /كم", Fmt.pace(it.first)), it.second)) }
+        longest?.let { add(Triple(tr("أطول مسافة"), tr("{0} كم", Fmt.dist(it.distanceM)), it)) }
+        longestRun?.let { add(Triple(tr("أطول جري"), tr("{0} كم", Fmt.dist(it.runM)), it)) }
+        topSpeed?.let { add(Triple(tr("أعلى سرعة"), tr("{0} كم/س", (it.maxSpeedMps * 3.6).roundToInt()), it)) }
+        mostSprints?.let { add(Triple(tr("أكثر سبرنتات"), "${it.sprints}", it)) }
     }
     PlainCard(modifier.fillMaxWidth(), radius = 30.dp, pad = 18.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("أرقامك القياسية", style = txt(15, p.text, FontWeight.SemiBold))
-            if (rows.isEmpty()) Text("سجّل أول تمرين وتطلع أرقامك هنا.", style = txt(13, p.muted))
+            Text(tr("أرقامك القياسية"), style = txt(15, p.text, FontWeight.SemiBold))
+            if (rows.isEmpty()) Text(tr("سجّل أول تمرين وتطلع أرقامك هنا."), style = txt(13, p.muted))
             rows.forEach { (label, value, w) ->
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).bounceClick { onOpen(w.id) }.padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {

@@ -1,5 +1,7 @@
 package com.bachir.khutwa.mobile
 
+import com.bachir.khutwa.shared.tr
+
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -74,7 +76,9 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-fun String.ar(): String = map { if (it in '0'..'9') '٠' + (it - '0') else it }.joinToString("")
+fun String.ar(): String = if (com.bachir.khutwa.shared.Tr.en) this else map { if (it in '0'..'9') '٠' + (it - '0') else it }.joinToString("")
+
+fun appLocale(): Locale = if (com.bachir.khutwa.shared.Tr.en) Locale.US else Locale.forLanguageTag("ar")
 fun Number.grouped(): String = "%,d".format(Locale.US, this.toLong())
 
 fun txt(size: Int, color: Color, weight: FontWeight = FontWeight.Normal) =
@@ -101,6 +105,8 @@ fun HomeScreen(
     onOpen: (String) -> Unit,
     onStats: () -> Unit,
     onSettings: () -> Unit,
+    badges: List<Earned> = emptyList(),
+    onBadges: () -> Unit = {},
 ) {
     val p = LocalPalette.current
     val set = Settings.current
@@ -142,6 +148,7 @@ fun HomeScreen(
                     KcalCard(today.kcal, Modifier.weight(1f))
                 }
             }
+            item { BadgeStrip(badges, Modifier.enter(5), onBadges) }
             if (tips.isNotEmpty()) item { TipsRow(tips, Modifier.enter(5)) }
             item { WeekGoalCard(weekKm, set.weeklyGoalKm, Modifier.enter(6)) }
             if (showConnect) item {
@@ -149,22 +156,22 @@ fun HomeScreen(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).border(1.dp, p.line, RoundedCornerShape(24.dp))
                         .bounceClick(onClick = onConnect).padding(16.dp)
                 ) {
-                    Text("اربط مع Samsung Health عشان تظهر الخطوات والنبض والنوم", style = txt(14, p.text, FontWeight.Medium))
+                    Text(tr("اربط مع Samsung Health عشان تظهر الخطوات والنبض والنوم"), style = txt(14, p.text, FontWeight.Medium))
                 }
             }
             item {
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("تمارين اليوم", style = txt(18, p.text, FontWeight.SemiBold), modifier = Modifier.weight(1f))
-                    Text("${todays.size}".ar() + " تمرين", style = txt(13, p.muted))
+                    Text(tr("تمارين اليوم"), style = txt(18, p.text, FontWeight.SemiBold), modifier = Modifier.weight(1f))
+                    Text("${todays.size}".ar() + tr(" تمرين"), style = txt(13, p.muted))
                 }
             }
             if (todays.isEmpty()) item {
-                PlainCard(Modifier.fillMaxWidth()) { Text("ما فيه تمارين اليوم للحين. يلا!", style = txt(14, p.muted)) }
+                PlainCard(Modifier.fillMaxWidth()) { Text(tr("ما فيه تمارين اليوم للحين. يلا!"), style = txt(14, p.muted)) }
             }
             itemsIndexed(todays, key = { _, w -> w.id }) { i, w -> WorkoutRow(w, Modifier.enter(5 + i)) { onOpen(w.id) } }
             val older = workouts.filter { it.startMs < dayStart }.take(15)
             if (older.isNotEmpty()) {
-                item { Text("قبل", style = txt(16, p.text, FontWeight.SemiBold), modifier = Modifier.padding(top = 8.dp)) }
+                item { Text(tr("قبل"), style = txt(16, p.text, FontWeight.SemiBold), modifier = Modifier.padding(top = 8.dp)) }
                 itemsIndexed(older, key = { _, w -> w.id }) { _, w -> WorkoutRow(w) { onOpen(w.id) } }
             }
         }
@@ -174,9 +181,9 @@ fun HomeScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CtaPill("ابدأ تمرين", Modifier.weight(1f), onStart)
-            RoundIcon(Icons.Outlined.BarChart, "الإحصائيات", onStats)
-            RoundIcon(Icons.Outlined.Settings, "الإعدادات", onSettings)
+            CtaPill(tr("ابدأ تمرين"), Modifier.weight(1f), onStart)
+            RoundIcon(Icons.Outlined.BarChart, tr("الإحصائيات"), onStats)
+            RoundIcon(Icons.Outlined.Settings, tr("الإعدادات"), onSettings)
         }
     }
 }
@@ -212,11 +219,11 @@ fun CtaPill(label: String, modifier: Modifier = Modifier, onClick: () -> Unit, p
 private fun Header(name: String, streak: Int, weather: com.bachir.khutwa.shared.WeatherInfo?, modifier: Modifier) {
     val p = LocalPalette.current
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    val greet = if (hour < 12) "صباح الخير" else "مساء الخير"
+    val greet = if (hour < 12) tr("صباح الخير") else tr("مساء الخير")
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(SimpleDateFormat("EEEE d MMMM", Locale("ar")).format(Date()), style = txt(13, p.muted))
-            Text("$greet، $name", style = txt(22, p.text, FontWeight.SemiBold))
+            Text(SimpleDateFormat("EEEE d MMMM", appLocale()).format(Date()), style = txt(13, p.muted))
+            Text(tr("{0}، {1}", greet, name), style = txt(22, p.text, FontWeight.SemiBold))
             weather?.let { Box(Modifier.padding(top = 6.dp)) { WeatherChip(it, onDark = p.dark) } }
         }
         if (streak > 0) Row(
@@ -224,8 +231,8 @@ private fun Header(name: String, streak: Int, weather: com.bachir.khutwa.shared.
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Icon(Icons.Filled.LocalFireDepartment, null, tint = RunOrange, modifier = Modifier.size(18.dp))
-            Text("$streak", style = numStyle(18.sp, p.text, FontWeight.Bold))
-            Text(if (streak == 1) "يوم" else "أيام", style = txt(12, p.muted))
+            Text("${streak}", style = numStyle(18.sp, p.text, FontWeight.Bold))
+            Text(if (streak == 1) tr("يوم") else tr("أيام"), style = txt(12, p.muted))
         }
     }
 }
@@ -235,11 +242,11 @@ private fun StepsHero(t: TodaySummary, modifier: Modifier) {
     val p = LocalPalette.current
     val frac = (t.steps.toFloat() / t.stepGoal).coerceIn(0f, 1f)
     val pct = (frac * 100).toInt()
-    val sub = "$pct٪ من ${t.stepGoal.grouped()} • ${"%.1f".format(Locale.US, t.distanceM / 1000)} كم".ar()
+    val sub = tr("{0}٪ من {1} • {2} كم", pct, t.stepGoal.grouped(), "%.1f".format(Locale.US, t.distanceM / 1000)).ar()
 
     if (p.dark) {
         ToneCard(CardTone.STEPS, modifier.fillMaxWidth().height(200.dp), radius = 38.dp, pad = 20.dp) {
-            Text("خطوات اليوم", style = txt(15, Color.White), modifier = Modifier.align(Alignment.TopStart))
+            Text(tr("خطوات اليوم"), style = txt(15, Color.White), modifier = Modifier.align(Alignment.TopStart))
             Column(Modifier.align(Alignment.BottomStart)) {
                 CountText(t.steps, numStyle(72.sp, Color.White))
                 Text(sub, style = txt(13, Color.White.copy(alpha = 0.88f)))
@@ -249,7 +256,7 @@ private fun StepsHero(t: TodaySummary, modifier: Modifier) {
     } else {
         Row(modifier.fillMaxWidth().padding(top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.Bottom) {
             Column(Modifier.weight(1f)) {
-                Text("خطوات اليوم", style = txt(14, p.muted))
+                Text(tr("خطوات اليوم"), style = txt(14, p.muted))
                 CountText(t.steps, numStyle(80.sp, p.text))
                 Text(sub, style = txt(13, p.muted))
             }
@@ -297,13 +304,13 @@ private fun RowScope.StatCard(
 
 @Composable
 private fun RowScope.HeartCard(t: TodaySummary) = StatCard(
-    "نبض القلب", Icons.Outlined.FavoriteBorder, CardTone.HEART,
-    corner = t.restingHr?.let { "راحة $it".ar() },
+    tr("نبض القلب"), Icons.Outlined.FavoriteBorder, CardTone.HEART,
+    corner = t.restingHr?.let { tr("راحة {0}", it).ar() },
 ) { fg, sub ->
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.weight(1f)) {
-            if (t.hr != null) CountText(t.hr!!.toLong(), numStyle(38.sp, fg), { "$it" }) else Text("--", style = numStyle(38.sp, fg))
-            Text(" ن/د", style = txt(12, sub), modifier = Modifier.padding(bottom = 6.dp))
+            if (t.hr != null) CountText(t.hr!!.toLong(), numStyle(38.sp, fg), { "${it}" }) else Text("--", style = numStyle(38.sp, fg))
+            Text(tr(" ن/د"), style = txt(12, sub), modifier = Modifier.padding(bottom = 6.dp))
         }
         BeatingHeart(t.hr, if (LocalPalette.current.dark) HeartRed else fg, 22.dp)
     }
@@ -311,7 +318,7 @@ private fun RowScope.HeartCard(t: TodaySummary) = StatCard(
 
 @Composable
 private fun RowScope.SleepCard(t: TodaySummary) = StatCard(
-    "النوم", Icons.Outlined.Bedtime, CardTone.SLEEP, corner = "آخر ليلة",
+    tr("النوم"), Icons.Outlined.Bedtime, CardTone.SLEEP, corner = tr("آخر ليلة"),
 ) { fg, sub ->
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         val m = t.sleepMin
@@ -319,9 +326,9 @@ private fun RowScope.SleepCard(t: TodaySummary) = StatCard(
             if (m == null) Text("--", style = numStyle(38.sp, fg))
             else {
                 Text("${m / 60}", style = numStyle(38.sp, fg))
-                Text("س ", style = txt(12, sub), modifier = Modifier.padding(bottom = 6.dp))
+                Text(tr("س "), style = txt(12, sub), modifier = Modifier.padding(bottom = 6.dp))
                 Text("${m % 60}", style = numStyle(38.sp, fg))
-                Text("د", style = txt(12, sub), modifier = Modifier.padding(bottom = 6.dp))
+                Text(tr("د"), style = txt(12, sub), modifier = Modifier.padding(bottom = 6.dp))
             }
         }
     }
@@ -329,11 +336,11 @@ private fun RowScope.SleepCard(t: TodaySummary) = StatCard(
 
 @Composable
 private fun RowScope.MinutesCard(t: TodaySummary) = StatCard(
-    "دقائق التمرين", Icons.Outlined.Timer, CardTone.MINUTES, CardTone.MINUTES_LIGHT,
+    tr("دقائق التمرين"), Icons.Outlined.Timer, CardTone.MINUTES, CardTone.MINUTES_LIGHT,
     corner = "/ ${t.exerciseGoalMin}".ar(),
 ) { fg, _ ->
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        CountText(t.exerciseMin.toLong(), numStyle(38.sp, fg), { "$it" }, Modifier.weight(1f))
+        CountText(t.exerciseMin.toLong(), numStyle(38.sp, fg), { "${it}" }, Modifier.weight(1f))
         val filled = ((t.exerciseMin.toFloat() / t.exerciseGoalMin) * 7).toInt().coerceIn(0, 7)
         Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
             repeat(7) { i -> Box(Modifier.size(6.dp).clip(CircleShape).background(if (i < filled) fg else fg.copy(alpha = 0.35f))) }
@@ -343,16 +350,16 @@ private fun RowScope.MinutesCard(t: TodaySummary) = StatCard(
 
 @Composable
 private fun RowScope.WorkoutsCard(t: TodaySummary) = StatCard(
-    "التمارين", Icons.Outlined.CalendarMonth, CardTone.WORKOUTS,
+    tr("التمارين"), Icons.Outlined.CalendarMonth, CardTone.WORKOUTS,
 ) { fg, sub ->
     Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.Bottom) {
         Column {
-            CountText(t.workoutsWeek.toLong(), numStyle(38.sp, fg), { "$it" })
-            Text("الأسبوع", style = txt(11, sub))
+            CountText(t.workoutsWeek.toLong(), numStyle(38.sp, fg), { "${it}" })
+            Text(tr("الأسبوع"), style = txt(11, sub))
         }
         Column {
-            CountText(t.workoutsMonth.toLong(), numStyle(38.sp, sub), { "$it" })
-            Text("الشهر", style = txt(11, sub))
+            CountText(t.workoutsMonth.toLong(), numStyle(38.sp, sub), { "${it}" })
+            Text(tr("الشهر"), style = txt(11, sub))
         }
     }
 }
@@ -365,13 +372,13 @@ fun WeekGoalCard(km: Double, goalKm: Int, modifier: Modifier = Modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
-                    Text("هدف الأسبوع", style = txt(14, Color.White))
+                    Text(tr("هدف الأسبوع"), style = txt(14, Color.White))
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text("%.1f".format(Locale.US, km), style = numStyle(34.sp, Color.White))
-                        Text(" / $goalKm كم", style = txt(13, Color.White.copy(alpha = 0.85f)), modifier = Modifier.padding(bottom = 5.dp))
+                        Text(tr(" / {0} كم", goalKm), style = txt(13, Color.White.copy(alpha = 0.85f)), modifier = Modifier.padding(bottom = 5.dp))
                     }
                 }
-                Text(if (frac >= 1f) "حققته!" else "باقي ${"%.1f".format(Locale.US, (goalKm - km).coerceAtLeast(0.0))} كم".ar(),
+                Text(if (frac >= 1f) tr("حققته!") else tr("باقي {0} كم", "%.1f".format(Locale.US, (goalKm - km).coerceAtLeast(0.0))).ar(),
                     style = txt(13, if (frac >= 1f) FootballGreen else Color.White.copy(alpha = 0.9f), FontWeight.Medium))
             }
             Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Color.White.copy(alpha = 0.18f))) {
@@ -394,26 +401,26 @@ fun typeIcon(type: WorkoutType, runM: Double = 0.0): ImageVector = when (type) {
 @Composable
 fun WorkoutRow(w: Workout, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val p = LocalPalette.current
-    val time = SimpleDateFormat("EEE h:mm a", Locale("ar")).format(Date(w.startMs))
+    val time = SimpleDateFormat("EEE h:mm a", appLocale()).format(Date(w.startMs))
     PlainCard(modifier.fillMaxWidth().bounceClick(onClick = onClick)) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CircleIcon(typeIcon(w.type, w.runM), p.invText, p.line, 44.dp, filled = p.invBg)
                 Column(Modifier.weight(1f)) {
                     Text(w.title, style = txt(15, p.text, FontWeight.SemiBold))
-                    Text("$time • ${if (w.source == "watch") "الساعة" else "الجوال"}", style = txt(12, p.muted), maxLines = 1)
+                    Text("${time} • ${if (w.source == "watch") tr("الساعة") else tr("الجوال")}", style = txt(12, p.muted), maxLines = 1)
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     if (w.type == WorkoutType.FOOTBALL) {
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text("${w.activeMs / 60_000}", style = numStyle(26.sp, p.text))
-                            Text(" د", style = txt(12, p.muted))
+                            Text(tr(" د"), style = txt(12, p.muted))
                         }
-                        Text("${w.sprints} سبرنت".ar(), style = txt(12, p.muted))
+                        Text(tr("{0} سبرنت", w.sprints).ar(), style = txt(12, p.muted))
                     } else {
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text(Fmt.dist(w.distanceM), style = numStyle(26.sp, p.text))
-                            Text(" كم", style = txt(12, p.muted))
+                            Text(tr(" كم"), style = txt(12, p.muted))
                         }
                         Text("${Fmt.duration(w.activeMs)} • ${Fmt.pace(w.avgPaceSec)}", style = numStyle(13.sp, p.muted, FontWeight.SemiBold))
                     }
@@ -475,16 +482,16 @@ fun WaterCard(ml: Int, goal: Int, modifier: Modifier, onAdd: (Int) -> Unit) {
         }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("الموية", style = txt(15, Color.White), modifier = Modifier.weight(1f))
-                Text("/ ${goal.grouped()} مل", style = txt(11, Color.White.copy(alpha = 0.85f)))
+                Text(tr("الموية"), style = txt(15, Color.White), modifier = Modifier.weight(1f))
+                Text(tr("/ {0} مل", goal.grouped()), style = txt(11, Color.White.copy(alpha = 0.85f)))
             }
             Row(verticalAlignment = Alignment.Bottom) {
                 CountText(ml.toLong(), numStyle(34.sp, Color.White))
-                Text(" مل", style = txt(12, Color.White.copy(alpha = 0.85f)), modifier = Modifier.padding(bottom = 6.dp))
+                Text(tr(" مل"), style = txt(12, Color.White.copy(alpha = 0.85f)), modifier = Modifier.padding(bottom = 6.dp))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                WaterBtn("+٢٥٠", Modifier.weight(1f)) { onAdd(250) }
-                WaterBtn("+٥٠٠", Modifier.weight(1f)) { onAdd(500) }
+                WaterBtn(tr("+٢٥٠"), Modifier.weight(1f)) { onAdd(250) }
+                WaterBtn(tr("+٥٠٠"), Modifier.weight(1f)) { onAdd(500) }
                 WaterBtn("−", Modifier.width(40.dp)) { onAdd(-250) }
             }
         }
@@ -504,8 +511,8 @@ private fun KcalCard(kcal: Int, modifier: Modifier) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Icon(Icons.Filled.LocalFireDepartment, null, tint = Color.White, modifier = Modifier.size(24.dp))
             Column {
-                CountText(kcal.toLong(), numStyle(34.sp, Color.White), { "$it" })
-                Text("سعرة من التمارين", style = txt(11, Color.White.copy(alpha = 0.9f)), maxLines = 2)
+                CountText(kcal.toLong(), numStyle(34.sp, Color.White), { "${it}" })
+                Text(tr("سعرة من التمارين"), style = txt(11, Color.White.copy(alpha = 0.9f)), maxLines = 2)
             }
         }
     }

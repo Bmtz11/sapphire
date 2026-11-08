@@ -19,8 +19,12 @@ import androidx.health.services.client.data.ExerciseType
 import androidx.health.services.client.data.ExerciseUpdate
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
-import com.bachir.khutwa.shared.ArabicCoach
+import com.bachir.khutwa.shared.Coach
 import com.bachir.khutwa.shared.LiveSession
+import com.bachir.khutwa.shared.LiveLite
+import com.bachir.khutwa.shared.tr
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
 import com.bachir.khutwa.shared.Notif
 import com.bachir.khutwa.shared.TrackPoint
 import com.bachir.khutwa.shared.TtsSpeaker
@@ -69,7 +73,7 @@ class ExerciseService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         client = HealthServices.getClient(this).exerciseClient
-        speaker = TtsSpeaker(this).apply { fallback = { PhoneLink.speakOnPhone(this@ExerciseService, it) } }
+        speaker = TtsSpeaker(this, WatchToday.coach.value.english).apply { fallback = { PhoneLink.speakOnPhone(this@ExerciseService, it) } }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -79,18 +83,18 @@ class ExerciseService : LifecycleService() {
                 runCatching { WorkoutType.valueOf(intent.getStringExtra("type") ?: "") }.getOrDefault(WorkoutType.WALK)
             )
             ACTION_STOP -> stopWorkout()
-            ACTION_SPEAK -> speaker.speak(ArabicCoach.status(LiveSession.stats.value))
+            ACTION_SPEAK -> speaker.speak(Coach.status(LiveSession.stats.value))
             ACTION_PAUSE -> recorder?.let { r ->
                 r.pause(System.currentTimeMillis())
                 lifecycleScope.launch { runCatching { client.pauseExerciseAsync().await() } }
                 LiveSession.stats.value = r.stats(System.currentTimeMillis())
-                if (coach.coachOn) speaker.speak(ArabicCoach.paused())
+                if (coach.coachOn) speaker.speak(Coach.paused())
             }
             ACTION_RESUME -> recorder?.let { r ->
                 r.resume(System.currentTimeMillis())
                 lifecycleScope.launch { runCatching { client.resumeExerciseAsync().await() } }
                 LiveSession.stats.value = r.stats(System.currentTimeMillis())
-                if (coach.coachOn) speaker.speak(ArabicCoach.resumed())
+                if (coach.coachOn) speaker.speak(Coach.resumed())
             }
         }
         return START_NOT_STICKY
@@ -132,17 +136,21 @@ class ExerciseService : LifecycleService() {
                 .build()
             client.startExerciseAsync(config).await()
             if (coach.coachOn) {
-                speaker.speak(ArabicCoach.start(type))
-                r.firstInterval()?.let { speaker.speak(ArabicCoach.phrase(it)) }
+                speaker.speak(Coach.start(type))
+                r.firstInterval()?.let { speaker.speak(Coach.phrase(it)) }
             }
         }
 
         ticker = lifecycleScope.launch {
+            var n = 0
             while (isActive) {
                 recorder?.let {
                     val t = System.currentTimeMillis()
-                    it.tick(t).forEach { e -> speaker.speak(ArabicCoach.phrase(e)) }
-                    LiveSession.stats.value = it.stats(t)
+                    it.tick(t).forEach { e -> speaker.speak(Coach.phrase(e)) }
+                    val st = it.stats(t)
+                    LiveSession.stats.value = st
+                    // mirror on the phone (screen, lock screen, Now Bar) every 2 s
+                    if (n++ % 2 == 0) PhoneLink.sendLive(this@ExerciseService, LiveLite.encode(LiveLite.of(st)))
                 }
                 delay(1000)
             }
@@ -159,7 +167,8 @@ class ExerciseService : LifecycleService() {
             val w = r.finish(System.currentTimeMillis())
             LiveSession.stats.value = null
             LiveSession.lastWorkout.value = w
-            if (coach.coachOn) speaker.speak(ArabicCoach.finish(w))
+            PhoneLink.sendLive(this@ExerciseService, "end")
+            if (coach.coachOn) speaker.speak(Coach.finish(w))
             WatchStore.save(this@ExerciseService, w)
             runCatching { PhoneLink.sendWorkout(this@ExerciseService, w) }
             delay(8_000) // let the summary finish speaking
@@ -175,7 +184,7 @@ class ExerciseService : LifecycleService() {
             val m = update.latestMetrics
 
             m.getData(DataType.HEART_RATE_BPM).lastOrNull()?.let { dp ->
-                r.onHeartRate(dp.getTimeInstant(boot).toEpochMilli(), dp.value.toInt()).forEach { speaker.speak(ArabicCoach.phrase(it)) }
+                r.onHeartRate(dp.getTimeInstant(boot).toEpochMilli(), dp.value.toInt()).forEach { speaker.speak(Coach.phrase(it)) }
             }
             m.getData(DataType.STEPS_PER_MINUTE).lastOrNull()?.let {
                 r.onCadence(it.getTimeInstant(boot).toEpochMilli(), it.value.toDouble())
@@ -183,7 +192,7 @@ class ExerciseService : LifecycleService() {
             val stepDelta = m.getData(DataType.STEPS).sumOf { it.value }
             if (stepDelta > 0) {
                 stepsTotal += stepDelta
-                r.onStepTotal(System.currentTimeMillis(), stepsTotal).forEach { speaker.speak(ArabicCoach.phrase(it)) }
+                r.onStepTotal(System.currentTimeMillis(), stepsTotal).forEach { speaker.speak(Coach.phrase(it)) }
             }
             m.getData(DataType.ABSOLUTE_ELEVATION).lastOrNull()?.let { r.onAltitude(it.value) }
             m.getData(DataType.SPEED).forEach { r.onSpeed(it.getTimeInstant(boot).toEpochMilli(), it.value) }
@@ -194,7 +203,7 @@ class ExerciseService : LifecycleService() {
                     lat = l.latitude, lon = l.longitude,
                     alt = l.altitude.takeIf { !it.isNaN() },
                 )
-                r.onLocation(p).forEach { speaker.speak(ArabicCoach.phrase(it)) }
+                r.onLocation(p).forEach { speaker.speak(Coach.phrase(it)) }
             }
         }
 
@@ -211,7 +220,19 @@ class ExerciseService : LifecycleService() {
         val type = if (Build.VERSION.SDK_INT >= 34)
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
         else ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-        ServiceCompat.startForeground(this, Notif.ID, Notif.build(this, "تمرين شغال", open), type)
+        val nb = Notif.builder(this, tr("تمرين شغال"), open)
+        // Wear OS ongoing activity: shows on the watch face and recents while the workout runs
+        runCatching {
+            OngoingActivity.Builder(applicationContext, Notif.ID, nb)
+                .setStaticIcon(R.drawable.ic_run)
+                .setTouchIntent(open)
+                .setStatus(
+                    Status.Builder().addTemplate("#t#")
+                        .addPart("t", Status.StopwatchPart(SystemClock.elapsedRealtime())).build()
+                )
+                .build().apply(applicationContext)
+        }
+        ServiceCompat.startForeground(this, Notif.ID, nb.build(), type)
     }
 
     override fun onDestroy() {
